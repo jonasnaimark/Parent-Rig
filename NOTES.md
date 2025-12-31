@@ -38,8 +38,8 @@ Both take up indices in the property list. This affects how you reference proper
 | 22 | endLabel | (auto-generated) |
 | 23 | label | "Transform type:" |
 | 24 | endLabel | (auto-generated) |
-| **25** | popup | **Scale around** (1=Child, 2=Parent) |
-| **26** | popup | **Rotate around** (1=Child, 2=Parent) |
+| **25** | popup | **Scale around** (1=Child, 2=Parent, 3=Leader) |
+| **26** | popup | **Rotate around** (1=Child, 2=Parent, 3=Leader) |
 | 27 | label | "" (empty separator) |
 | 28 | endLabel | (auto-generated) |
 | 29 | group header | "Children follow:" |
@@ -85,9 +85,9 @@ var leaderIndexProp = pEff(18);          // Leader index
 var delayBeforeLeaderProp = pEff(19);    // Delay before leader
 var delayAfterLeaderProp = pEff(20);     // Delay after leader
 
-// Transform type popups (indices 25-26): 1=Child, 2=Parent
-var scaleAroundParent = pEff(25).value === 2;
-var rotateAroundParent = pEff(26).value === 2;
+// Transform type popups (indices 25-26): 1=Child, 2=Parent, 3=Leader
+var scaleAroundMode = pEff(25).value;   // 1=Child, 2=Parent, 3=Leader
+var rotateAroundMode = pEff(26).value;  // 1=Child, 2=Parent, 3=Leader
 
 // Children follow (indices 30-34) - FLAT INDICES, NOT GROUP ACCESS
 var followPosition = pEff(30).value;
@@ -406,31 +406,53 @@ ls -la "/Users/jonas_naimark/Documents/ParentRig-CEP/assets/presets/Parent Rig -
 6. **Forgetting to run test-indices.jsx** - Property indices change when you add/remove properties
 7. **Using regex-based Python script** - Regex with `.*?` on large XML files hangs indefinitely. Use the line-by-line script instead
 
-## Transform Around Parent Features
+## Transform Around Pivot Features
 
-### Scale Around Parent
+The "Scale around" and "Rotate around" popups control the pivot point for scale/rotation transforms. Each has three modes:
+
+| Mode | Value | Behavior |
+|------|-------|----------|
+| Child | 1 | Default. Children scale/rotate around their own anchor points |
+| Parent | 2 | Children scale/rotate around the parent layer's rest position |
+| Leader | 3 | Children scale/rotate around the current leader layer's position |
+
+### Scale Around Parent (Mode 2)
 When enabled, children scale around the parent's position instead of their own anchor point.
 - Parent scales up → children move **away** from parent (positions expand outward)
 - Parent scales down → children move **toward** parent (positions contract inward)
 - Creates a "group scale" effect where the whole arrangement scales as a unit
 - Works independently of the "Follow Scale" checkbox (which controls whether children inherit scale values)
 
-### Rotate Around Parent
+### Rotate Around Parent (Mode 2)
 When enabled, children orbit around the parent when it rotates instead of rotating in place.
 - Parent rotates → children orbit around parent in a circular path
 - Creates a "group rotation" effect where the whole arrangement rotates as a unit
 - Works independently of the "Follow Rotation" checkbox (which controls whether children inherit rotation values)
 
+### Scale/Rotate Around Leader (Mode 3)
+When enabled, children scale/rotate around the **current leader layer** (determined by Leader Index control).
+- Similar to "around Parent" but the pivot is dynamic based on Leader Index
+- The leader layer itself is excluded from this transform (to avoid scaling/rotating around itself)
+- Uses `findLeaderLayer()` to find the child with matching PR_Index value
+- Changing Leader Index changes which layer is the pivot point
+
+**Use cases for Leader mode:**
+- **Center-out scaling**: Set Leader to middle child, all other children scale from center
+- **Focus zoom**: Scale the group while one layer stays fixed as the focal point
+- **Dynamic pivot**: Animate Leader Index to change which layer is the pivot over time
+
 ### Transform Order
 When both are enabled, scale is applied first, then rotation (matching After Effects' standard transform order). This means:
-1. Child offset from parent is scaled by parent's scale ratio
+1. Child offset from pivot is scaled by parent's scale ratio
 2. The scaled offset is then rotated by parent's rotation delta
 
 ### Implementation Notes
 - Uses the same time remapping (delay/stretch) as position for consistent timing
-- Respects influence - at 0% influence, no transform-around-parent effect is applied
+- Respects influence - at 0% influence, no transform-around-pivot effect is applied
 - For split dimensions (separate X/Y/Z position), both X and Y expressions calculate the full rotation to extract their respective components
-- Z axis rotation-around-parent is not supported in split dimension mode
+- Z axis rotation-around-pivot is not supported in split dimension mode
+- Leader mode scans all layers in the comp to find the layer with matching PR_Index (performance impact only when Leader mode is active)
+- Leader mode handles split dimension layers by checking for xPosition/yPosition properties
 
 ## Leader Index Feature
 
