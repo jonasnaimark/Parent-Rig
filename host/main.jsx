@@ -867,15 +867,14 @@ function rigParentChildGroup(parent, children, comp) {
 
     addParentEffect(parent, children.length);
 
+    // First pass: collect all children's world positions for bounds calculation
+    var childData = [];
     for (var i = 0; i < children.length; i++) {
         var child = children[i];
-        // Reverse index order: bottom layer in timeline = index 1 (animates first)
         var childIndex = children.length - i;
 
-        // Sync child's split dimensions to match parent
         child.transform.position.dimensionsSeparated = parentSplitDims;
 
-        // Get child position (handle split dimensions)
         var childLocalPos;
         if (parentSplitDims) {
             childLocalPos = [
@@ -894,16 +893,11 @@ function rigParentChildGroup(parent, children, comp) {
         var childRestAnchor = child.transform.anchorPoint.valueAtTime(currentTime, false);
 
         var childWorldPos;
-
-        // For the original parent that became a child (when rig layer created),
-        // its position is already in world space - don't transform it
         var isOriginalParentAsChild = rigLayerCreated && child.index === originalParent.index;
 
         if (isOriginalParentAsChild) {
-            // Original parent's position is already world position
-            childWorldPos = childLocalPos.slice(); // Copy the array
+            childWorldPos = childLocalPos.slice();
         } else {
-            // Normal children: convert local position to world position
             var parentPos = parentRestPos;
             var parentAnchor = parentRestAnchor;
             var parentScale = parentRestScale;
@@ -930,24 +924,58 @@ function rigParentChildGroup(parent, children, comp) {
             }
         }
 
-        child.parent = null;
+        childData.push({
+            child: child,
+            childIndex: childIndex,
+            childWorldPos: childWorldPos,
+            childRestScale: childRestScale,
+            childRestRot: childRestRot,
+            childRestXRot: childRestXRot,
+            childRestYRot: childRestYRot,
+            childRestOpacity: childRestOpacity,
+            childRestAnchor: childRestAnchor
+        });
+    }
 
-        // Set child position (handle split dimensions)
+    // Calculate group bounds from all children's positions
+    var groupBounds = {
+        minX: Infinity, maxX: -Infinity,
+        minY: Infinity, maxY: -Infinity,
+        centerX: 0, centerY: 0
+    };
+    for (var j = 0; j < childData.length; j++) {
+        var pos = childData[j].childWorldPos;
+        groupBounds.minX = Math.min(groupBounds.minX, pos[0]);
+        groupBounds.maxX = Math.max(groupBounds.maxX, pos[0]);
+        groupBounds.minY = Math.min(groupBounds.minY, pos[1]);
+        groupBounds.maxY = Math.max(groupBounds.maxY, pos[1]);
+        groupBounds.centerX += pos[0];
+        groupBounds.centerY += pos[1];
+    }
+    groupBounds.centerX /= childData.length;
+    groupBounds.centerY /= childData.length;
+
+    // Second pass: apply effects and expressions with bounds
+    for (var k = 0; k < childData.length; k++) {
+        var data = childData[k];
+
+        data.child.parent = null;
+
         if (parentSplitDims) {
-            child.transform.xPosition.setValue(childWorldPos[0]);
-            child.transform.yPosition.setValue(childWorldPos[1]);
-            if (is3D && childWorldPos.length > 2) {
-                child.transform.zPosition.setValue(childWorldPos[2]);
+            data.child.transform.xPosition.setValue(data.childWorldPos[0]);
+            data.child.transform.yPosition.setValue(data.childWorldPos[1]);
+            if (is3D && data.childWorldPos.length > 2) {
+                data.child.transform.zPosition.setValue(data.childWorldPos[2]);
             }
         } else {
-            child.transform.position.setValue(childWorldPos);
+            data.child.transform.position.setValue(data.childWorldPos);
         }
 
-        addChildEffect(child, childIndex, parent.index,
-            childWorldPos, childRestScale, childRestRot, childRestXRot, childRestYRot, childRestOpacity, childRestAnchor,
+        addChildEffect(data.child, data.childIndex, parent.index,
+            data.childWorldPos, data.childRestScale, data.childRestRot, data.childRestXRot, data.childRestYRot, data.childRestOpacity, data.childRestAnchor,
             parentRestPos, parentRestScale, parentRestRot, parentRestXRot, parentRestYRot, parentRestOpacity, parentRestAnchor, is3D);
 
-        applyExpressions(child, parent, comp, is3D, parentSplitDims);
+        applyExpressions(data.child, parent, comp, is3D, parentSplitDims, groupBounds);
     }
 }
 
@@ -1213,8 +1241,20 @@ function addChildEffect(layer, index, parentLayerIndex,
 // EXPRESSION GENERATION
 // ============================================
 
-function applyExpressions(child, parent, comp, is3D, splitDims) {
+function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
     var parentName = parent.name.replace(/"/g, '\\"');
+
+    // Get child's current position (which is the rest position at rig time)
+    var childRestPos;
+    if (splitDims) {
+        childRestPos = [
+            child.transform.xPosition.value,
+            child.transform.yPosition.value
+        ];
+        if (is3D) childRestPos.push(child.transform.zPosition.value);
+    } else {
+        childRestPos = child.transform.position.value;
+    }
 
     // Common expression header - supports both pseudo effect and slider fallback
     // Detect which effect type is on the parent and get property references
@@ -1250,8 +1290,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims) {
             'var pinTrimProp = pEff(13);',
             '',
             '// Order section (indices 18-20)',
-            'var reverseOrderProp = pEff(18);',
-            'var randomEnabled = pEff(19).value;',
+            'var orderByProp = pEff(18);',  // 1=Leader, 3-6=directional, 7-10=diagonal, 11-12=radial, 13=random
+            'var reverseOrderProp = pEff(19);',
             'var randomSeed = pEff(20).value;',
             '',
             '// Leader layer section (indices 25-27)',
@@ -1298,20 +1338,84 @@ function applyExpressions(child, parent, comp, is3D, splitDims) {
             '// Child count (index 52)',
             'var childCount = pEff(52).value;',
             '',
+            '// Group bounds for position-based ordering (calculated at rig time)',
+            'var groupMinX = ' + groupBounds.minX + ';',
+            'var groupMaxX = ' + groupBounds.maxX + ';',
+            'var groupMinY = ' + groupBounds.minY + ';',
+            'var groupMaxY = ' + groupBounds.maxY + ';',
+            'var groupCenterX = ' + groupBounds.centerX + ';',
+            'var groupCenterY = ' + groupBounds.centerY + ';',
+            '',
+            '// Child rest position for position-based ordering (captured at rig time)',
+            'var childRestPosForOrder = [' + childRestPos[0] + ', ' + childRestPos[1] + '];',
+            '',
             '// Seeded random function for consistent randomization',
             'function seededRandom(seed, index) {',
             '    var hash = Math.sin(seed * 12.9898 + index * 78.233) * 43758.5453;',
             '    return hash - Math.floor(hash);',
             '}',
             '',
-            '// Get randomized index if random is enabled',
+            '// Get randomized index',
             'function getRandomizedIndex(baseIndex, seed, count) {',
             '    var rand = seededRandom(seed, baseIndex);',
             '    return 1 + rand * (count - 1);',
             '}',
             '',
-            '// Index values for blending',
-            'var topToBottomIndex = randomEnabled ? getRandomizedIndex(myIndex, randomSeed, childCount) : myIndex;',
+            '// Get position-based index for Order by modes',
+            '// Order by values: 1=Leader, 3=TopToBottom, 4=BottomToTop, 5=LeftToRight, 6=RightToLeft,',
+            '//   8=TLtoBR, 9=TRtoBL, 10=BLtoTR, 11=BRtoTL, 13=RadialOut, 14=RadialIn, 16=Random',
+            'function getPositionBasedIndex(mode, pos, count) {',
+            '    var rangeX = groupMaxX - groupMinX;',
+            '    var rangeY = groupMaxY - groupMinY;',
+            '    if (rangeX < 1) rangeX = 1;',
+            '    if (rangeY < 1) rangeY = 1;',
+            '    var normX = (pos[0] - groupMinX) / rangeX;',
+            '    var normY = (pos[1] - groupMinY) / rangeY;',
+            '    var normalized;',
+            '    ',
+            '    if (mode === 3) { normalized = 1 - normY; }',  // Top to Bottom: top (low Y) → high normalized → low index → first
+            '    else if (mode === 4) { normalized = normY; }',  // Bottom to Top: bottom (high Y) → high normalized → low index → first
+            '    else if (mode === 5) { normalized = 1 - normX; }',  // Left to Right: left (low X) → high normalized → low index → first
+            '    else if (mode === 6) { normalized = normX; }',  // Right to Left: right (high X) → high normalized → low index → first
+            '    else if (mode === 8) { normalized = (1 - normX + 1 - normY) / 2; }',  // TL to BR: TL → high → first
+            '    else if (mode === 9) { normalized = (normX + 1 - normY) / 2; }',  // TR to BL: TR → high → first
+            '    else if (mode === 10) { normalized = (1 - normX + normY) / 2; }',  // BL to TR: BL → high → first
+            '    else if (mode === 11) { normalized = (normX + normY) / 2; }',  // BR to TL: BR → high → first
+            '    else if (mode === 13) {',  // Radial outwards: center → high normalized → low index → first
+            '        var dx = pos[0] - groupCenterX;',
+            '        var dy = pos[1] - groupCenterY;',
+            '        var maxDist = Math.max(rangeX, rangeY) / 2;',
+            '        normalized = 1 - Math.sqrt(dx*dx + dy*dy) / Math.max(maxDist, 1);',
+            '    }',
+            '    else if (mode === 14) {',  // Radial inwards: edges → high normalized → low index → first
+            '        var dx = pos[0] - groupCenterX;',
+            '        var dy = pos[1] - groupCenterY;',
+            '        var maxDist = Math.max(rangeX, rangeY) / 2;',
+            '        normalized = Math.sqrt(dx*dx + dy*dy) / Math.max(maxDist, 1);',
+            '    }',
+            '    else { normalized = 0; }',
+            '    ',
+            '    // High normalized → low index → animate FIRST',
+            '    return count - Math.max(0, Math.min(1, normalized)) * (count - 1);',
+            '}',
+            '',
+            '// Get base index based on Order by mode',
+            'var orderByMode = orderByProp.value;',
+            'var baseIndex;',
+            'if (orderByMode === 1) {',
+            '    baseIndex = myIndex;',  // Leader mode - use stack order
+            '} else if (orderByMode === 16) {',
+            '    baseIndex = getRandomizedIndex(myIndex, randomSeed, childCount);',  // Random
+            '} else if (orderByMode >= 3 && orderByMode <= 14) {',
+            '    baseIndex = getPositionBasedIndex(orderByMode, childRestPosForOrder, childCount);',  // Position-based
+            '} else {',
+            '    baseIndex = myIndex;',  // Default/separator
+            '}',
+            '',
+            '// Apply reverse order blend',
+            'var ro = reverseOrderProp.value / 100;',
+            'var reversedIndex = childCount + 1 - baseIndex;',
+            'var topToBottomIndex = baseIndex + (reversedIndex - baseIndex) * ro;',
             'var bottomToTopIndex = childCount + 1 - topToBottomIndex;',
             '',
             '// Calculate effective index with delay falloff (geometric series)',
@@ -1406,7 +1510,6 @@ function applyExpressions(child, parent, comp, is3D, splitDims) {
             'var stretchProp = parentLayer.effect("PR_Delay Stretch")("Slider");',
             'var reverseOrderProp = parentLayer.effect("PR_Reverse Order")("Slider");',
             'var falloffProp = parentLayer.effect("PR_Falloff")("Slider");',
-            'var randomEnabled = parentLayer.effect("PR_Random")("Checkbox").value;',
             'var randomSeed = parentLayer.effect("PR_Random Seed")("Slider").value;',
             'var followPosition = parentLayer.effect("PR_Follow Position")("Checkbox").value;',
             'var followScale = parentLayer.effect("PR_Follow Scale")("Checkbox").value;',
@@ -1443,8 +1546,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims) {
             '    return 1 + rand * (count - 1);',
             '}',
             '',
-            '// Index values for blending',
-            'var topToBottomIndex = randomEnabled ? getRandomizedIndex(myIndex, randomSeed, childCount) : myIndex;',
+            '// Index values for blending (fallback mode uses stack order only)',
+            'var topToBottomIndex = myIndex;',
             'var bottomToTopIndex = childCount + 1 - topToBottomIndex;',
             '',
             '// Calculate effective index with falloff (geometric series)',
@@ -2327,6 +2430,74 @@ function addVerticalList() {
 
         // New layers go to top of stack, so first created (centered) ends up at bottom
     }
+
+    app.endUndoGroup();
+}
+
+function addGrid() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return;
+    }
+
+    app.beginUndoGroup("Add 5x5 Grid");
+
+    var gridSize = 5;
+    var squareSize = 150;
+    var gap = 30;
+    var cornerRadius = 20;
+    var fillColor = [0.1, 0.1, 0.1, 1]; // Dark gray
+
+    // Calculate total grid size
+    var totalWidth = gridSize * squareSize + (gridSize - 1) * gap;
+    var totalHeight = gridSize * squareSize + (gridSize - 1) * gap;
+
+    // Starting position (centered in comp)
+    var startX = (comp.width - totalWidth) / 2 + squareSize / 2;
+    var startY = (comp.height - totalHeight) / 2 + squareSize / 2;
+
+    // Create parent shape layer (empty)
+    var parentNull = comp.layers.addShape();
+    parentNull.name = "Grid Parent";
+    parentNull.transform.position.setValue([comp.width / 2, comp.height / 2]);
+    parentNull.label = 9; // Green
+
+    // Create grid of shape layers (bottom-right to top-left so layer order matches visual)
+    for (var row = gridSize - 1; row >= 0; row--) {
+        for (var col = gridSize - 1; col >= 0; col--) {
+            var x = startX + col * (squareSize + gap);
+            var y = startY + row * (squareSize + gap);
+
+            var layer = comp.layers.addShape();
+            var index = row * gridSize + col + 1;
+            layer.name = "Square " + index;
+
+            // Add rectangle shape
+            var contents = layer.property("ADBE Root Vectors Group");
+            var rectGroup = contents.addProperty("ADBE Vector Group");
+            rectGroup.name = "Rectangle";
+
+            var rectPath = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Shape - Rect");
+            rectPath.property("ADBE Vector Rect Size").setValue([squareSize, squareSize]);
+            rectPath.property("ADBE Vector Rect Roundness").setValue(cornerRadius);
+
+            var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
+            fill.property("ADBE Vector Fill Color").setValue(fillColor);
+
+            // Position the layer
+            layer.transform.position.setValue([x, y]);
+
+            // Parent to null
+            layer.parent = parentNull;
+        }
+    }
+
+    // Select parent for easy rigging
+    for (var i = 1; i <= comp.numLayers; i++) {
+        comp.layer(i).selected = false;
+    }
+    parentNull.selected = true;
 
     app.endUndoGroup();
 }

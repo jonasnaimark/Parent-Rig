@@ -1,4 +1,8 @@
-# Pin System - Implementation Plan
+# Parent Rig - Feature Plans
+
+---
+
+# ✅ Pin System (COMPLETED)
 
 ## Problem
 The current Influence Falloff system is too abstract for the main use case: overscroll stretch effects. Users need to juggle Falloff %, Curve %, and directional controls to achieve a simple "pin one end, stretch the rest" effect.
@@ -143,3 +147,101 @@ Layer 20: minimal stretch (follows almost fully)
 - Less flexible than falloff system (only first/last pinning)
 - Linear stretch only (no curve control)
 - But: these tradeoffs match the actual use case (overscroll)
+
+---
+
+# 🔮 Future Features
+
+---
+
+## Delay Order (Position-Based Staggering)
+
+### Problem
+Currently, delay order is based on layer stack order. Users often want to stagger animations based on spatial position (e.g., top-to-bottom, radial outward).
+
+### Proposed Solution: Add Delay Order Dropdown
+
+**New control in Order section:**
+- **Delay order** (dropdown, default: Leader)
+
+**Dropdown options:**
+1. Leader (default) - current behavior, based on Leader Index
+2. Top to bottom
+3. Bottom to top
+4. Left to right
+5. Right to left
+6. Top left to bottom right
+7. Top right to bottom left
+8. Bottom left to top right
+9. Bottom right to top left
+10. Radial outwards
+11. Radial inwards
+12. Random
+
+### Reverse Order Interaction
+- Options 1-11: Reverse Order slider works normally (can blend/flip direction)
+- Option 12 (Random): Reverse Order is ignored
+
+### Implementation Notes
+- Calculate sort value based on each child's rest position
+- For diagonal: `sortValue = restPos[0] + restPos[1]` (or difference for other diagonal)
+- For radial: `sortValue = distance(restPos, groupCenter)`
+- Group center = average of all children's rest positions
+
+---
+
+## Chain Mode (Daisy-Chain Parenting)
+
+### Problem
+Current system has all children following the parent directly (star topology). Some animations need compounding motion where each child follows the previous child (chain topology), like tails, ropes, or slinky effects.
+
+### Current (Star):
+```
+Parent ─┬─ Child 1
+        ├─ Child 2
+        ├─ Child 3
+        └─ Child 4
+```
+All children move the same amount (just delayed).
+
+### Chain Mode:
+```
+Parent → Child 1 → Child 2 → Child 3 → Child 4
+```
+Movements compound - Child 4 inherits lag/stretch from all previous children.
+
+### Proposed Solution: Add Chain Mode Toggle
+
+**New control on parent effect:**
+- **Chain mode** (checkbox, default: off)
+
+### Implementation Challenges
+
+**Rest Values:**
+Currently, rest values are baked into expressions as constants. In chain mode, each child needs to know its predecessor's rest position.
+
+**Solution:** Store rest values in effect properties (not just expression constants):
+- Add hidden sliders: `PR_RestX`, `PR_RestY`, `PR_RestZ`
+- Each child stores its own rest position
+- In chain mode, expression reads previous child's rest values by finding layer with `PR_Index = myIndex - 1`
+
+**Expression Logic:**
+```javascript
+if (chainMode && myIndex > 1) {
+    var prevChild = findChildByIndex(myIndex - 1);
+    var prevRestPos = [prevChild.effect("PR_RestX").value, prevChild.effect("PR_RestY").value];
+    var prevDelta = prevChild.position - prevRestPos;
+    // Apply delay/influence to prevDelta instead of parentDelta
+} else {
+    // Current behavior - follow parent
+}
+```
+
+### Use Cases
+- Tail/tentacle animations
+- Rope/cable physics
+- Slinky walking (combine with animated Leader + Rotate Around Leader)
+- Organic follow-through where extremities exaggerate
+
+### Estimated Effort
+1-2 days - requires restructuring rest value storage

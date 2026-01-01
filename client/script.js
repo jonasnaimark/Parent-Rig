@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var applyButton = document.getElementById('applyRig');
     var horizontalButton = document.getElementById('addHorizontal');
     var verticalButton = document.getElementById('addVertical');
+    var gridButton = document.getElementById('addGrid');
 
     applyButton.addEventListener('click', function() {
         applyButton.classList.add('loading');
@@ -34,5 +35,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     verticalButton.addEventListener('click', function() {
         csInterface.evalScript('addVerticalList()');
+    });
+
+    gridButton.addEventListener('click', function() {
+        csInterface.evalScript('addGrid()');
     });
 });
