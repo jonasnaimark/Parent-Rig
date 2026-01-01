@@ -8,7 +8,7 @@
 
 Both take up indices in the property list. This affects how you reference properties by index in expressions.
 
-### Parent Rig - Parent Effect Structure (UPDATED Dec 2024 - with Pin System)
+### Parent Rig - Parent Effect Structure (UPDATED Jan 2025 - with Pin Edges System)
 
 **CRITICAL:** Nested group properties use FLAT indexing in expressions. You CANNOT access them via `pEff("Group Name")("Property")` - this causes "can't use this param type" error. You MUST use numeric indices.
 
@@ -18,54 +18,72 @@ Both take up indices in the property list. This affects how you reference proper
 | 2 | endLabel | (auto) |
 | **3** | slider | **Delay - Step** |
 | **4** | slider | **Delay - Stretch** |
-| **5** | slider | **Falloff** (Delay) |
-| 6 | label | "" (empty separator) |
-| 7 | endLabel | (auto) |
-| 8 | label | " Influence:" |
-| 9 | endLabel | (auto) |
-| **10** | slider | **Influence on children** |
-| **11** | popup | **Pin layer** (1=None, 2=First, 3=Last) |
-| **12** | slider | **Pin influence** (0-100%, default 100%) |
-| **13** | slider | **Pin trim** (0-100, default 0) |
-| 14 | label | "" (empty separator) |
-| 15 | endLabel | (auto) |
-| 16 | label | "Order:" |
+| **5** | slider | **Influence on children** |
+| **6** | slider | **Falloff** (-100 to 100, default 0) |
+| 7 | label | "" (empty separator) |
+| 8 | endLabel | (auto) |
+| 9 | label | "Order:" |
+| 10 | endLabel | (auto) |
+| 11 | label | "Order by:" |
+| 12 | endLabel | (auto) |
+| **13** | popup | **Order by** (1=Leader, 3-6=directional, 7-10=diagonal, 11-14=radial, 16=random) |
+| **14** | slider | **Reverse order** |
+| **15** | slider | **Random seed** |
+| 16 | label | "" (empty separator) |
 | 17 | endLabel | (auto) |
-| **18** | slider | **Reverse order** |
-| **19** | checkbox | **Random order** |
-| **20** | slider | **Random seed** |
-| 21 | label | "" (empty separator) |
-| 22 | endLabel | (auto) |
-| 23 | label | "Leader layer:" |
+| 18 | label | "Leader layer:" |
+| 19 | endLabel | (auto) |
+| **20** | slider | **Leader index** |
+| **21** | slider | **Delay before leader** |
+| **22** | slider | **Delay after leader** |
+| 23 | label | "" (empty separator) |
 | 24 | endLabel | (auto) |
-| **25** | slider | **Leader index** |
-| **26** | slider | **Delay before leader** |
-| **27** | slider | **Delay after leader** |
-| 28 | label | "" (empty separator) |
-| 29 | endLabel | (auto) |
-| 30 | label | " Transform type:" |
-| 31 | endLabel | (auto) |
-| **32** | popup | **Scale around** (1=Child, 2=Parent, 3=Leader) |
-| **33** | popup | **Rotate around** (1=Child, 2=Parent, 3=Leader) |
-| 34 | label | "" (empty separator) |
-| 35 | endLabel | (auto) |
-| 36 | group header | "Children follow:" |
-| **37** | checkbox | **Position** (in Children follow) |
-| **38** | checkbox | **Scale** (in Children follow) |
-| **39** | checkbox | **Rotation** (in Children follow) |
-| **40** | checkbox | **Opacity** (in Children follow) |
-| **41** | checkbox | **Anchor point** (in Children follow) |
-| 42 | label | "" (empty separator inside group) |
-| 43 | endLabel | (auto) |
-| 44 | endGroup | (auto) |
-| 45 | group header | "Delays apply to:" |
-| **46** | checkbox | **Position** (in Delays apply to) |
-| **47** | checkbox | **Scale** (in Delays apply to) |
-| **48** | checkbox | **Rotation** (in Delays apply to) |
-| **49** | checkbox | **Opacity** (in Delays apply to) |
-| **50** | checkbox | **Anchor point** (in Delays apply to) |
+| 25 | label | "Transform type:" |
+| 26 | endLabel | (auto) |
+| **27** | popup | **Scale around** (1=Child, 2=Parent, 3=Leader) |
+| **28** | popup | **Rotate around** (1=Child, 2=Parent, 3=Leader) |
+| 29 | label | "" (empty separator) |
+| 30 | endLabel | (auto) |
+| 31 | group header | "Pin Edges:" |
+| **32** | popup | **Pin Direction** (1=Overscroll Stretch, 2=Collision Squish) |
+| **33** | slider | **Pin Influence** (0-100%, default 100%) |
+| **34** | slider | **Pin Trim** (0-100, default 0) |
+| 35 | label | "Top:" |
+| 36 | endLabel | (auto) |
+| **37** | checkbox | **Top** (enable top edge) |
+| **38** | slider | **Top Y** (boundary position) |
+| 39 | label | "Bottom:" |
+| 40 | endLabel | (auto) |
+| **41** | checkbox | **Bottom** (enable bottom edge) |
+| **42** | slider | **Bottom Y** (boundary position, default = comp height) |
+| 43 | label | "Left:" |
+| 44 | endLabel | (auto) |
+| **45** | checkbox | **Left** (enable left edge) |
+| **46** | slider | **Left X** (boundary position) |
+| 47 | label | "Right:" |
+| 48 | endLabel | (auto) |
+| **49** | checkbox | **Right** (enable right edge) |
+| **50** | slider | **Right X** (boundary position, default = comp width) |
 | 51 | endGroup | (auto) |
-| **52** | slider | **Child count** (hidden)
+| 52 | group header | "Children follow:" |
+| 53 | label | "" |
+| 54 | endLabel | (auto) |
+| **55** | checkbox | **Position** (in Children follow) |
+| **56** | checkbox | **Scale** (in Children follow) |
+| **57** | checkbox | **Rotation** (in Children follow) |
+| **58** | checkbox | **Opacity** (in Children follow) |
+| **59** | checkbox | **Anchor point** (in Children follow) |
+| 60 | label | "" (empty separator inside group) |
+| 61 | endLabel | (auto) |
+| 62 | endGroup | (auto) |
+| 63 | group header | "Delays apply to:" |
+| **64** | checkbox | **Position** (in Delays apply to) |
+| **65** | checkbox | **Scale** (in Delays apply to) |
+| **66** | checkbox | **Rotation** (in Delays apply to) |
+| **67** | checkbox | **Opacity** (in Delays apply to) |
+| **68** | checkbox | **Anchor point** (in Delays apply to) |
+| 69 | endGroup | (auto) |
+| **70** | slider | **Child count** (hidden)
 
 ### Expression Access Pattern (FLAT INDICES ONLY)
 
@@ -76,47 +94,55 @@ Always use flat numeric indices for ALL properties, including those inside group
 // In expressions, access pseudo effect properties:
 var pEff = parentLayer.effect("Parent Rig - Parent");
 
-// Delay section (indices 3-5)
+// Delay section (indices 3-6)
 var delayProp = pEff(3);              // Delay - Step
 var stretchProp = pEff(4);            // Delay - Stretch
-var delayFalloffProp = pEff(5);       // Falloff (Delay)
+var parentInfluenceProp = pEff(5);    // Influence on children
+var delayFalloffProp = pEff(6);       // Falloff (-100 to 100, default 0)
 
-// Influence section (indices 10-13)
-var parentInfluenceProp = pEff(10);   // Influence on children
-var pinModeProp = pEff(11);           // Pin layer (1=None, 2=First, 3=Last)
-var pinInfluenceProp = pEff(12);      // Pin influence (0-100%)
-var pinTrimProp = pEff(13);           // Pin trim (0-childCount)
+// Order section (indices 13-15)
+var orderByProp = pEff(13);           // Order by (1=Leader, 3-6=directional, etc.)
+var reverseOrderProp = pEff(14);      // Reverse order
+var randomSeed = pEff(15).value;      // Random seed
 
-// Order section (indices 18-20)
-var reverseOrderProp = pEff(18);    // Reverse order
-var randomEnabled = pEff(19).value; // Random order checkbox
-var randomSeed = pEff(20).value;    // Random seed
+// Leader layer section (indices 20-22)
+var leaderIndexProp = pEff(20);          // Leader index
+var delayBeforeLeaderProp = pEff(21);    // Delay before leader
+var delayAfterLeaderProp = pEff(22);     // Delay after leader
 
-// Leader layer section (indices 25-27)
-var leaderIndexProp = pEff(25);          // Leader index
-var delayBeforeLeaderProp = pEff(26);    // Delay before leader
-var delayAfterLeaderProp = pEff(27);     // Delay after leader
+// Transform type popups (indices 27-28): 1=Child, 2=Parent, 3=Leader
+var scaleAroundMode = pEff(27).value;    // Scale around
+var rotateAroundMode = pEff(28).value;   // Rotate around
 
-// Transform type popups (indices 32-33): 1=Child, 2=Parent, 3=Leader
-var scaleAroundMode = pEff(32).value;   // 1=Child, 2=Parent, 3=Leader
-var rotateAroundMode = pEff(33).value;  // 1=Child, 2=Parent, 3=Leader
+// Pin Edges section (indices 32-50)
+var pinDirectionProp = pEff(32);         // 1=Overscroll Stretch, 2=Collision Squish
+var pinInfluenceProp = pEff(33);         // Pin influence (0-100%)
+var pinTrimProp = pEff(34);              // Pin trim (0-childCount)
+var pinTopEnabled = pEff(37).value;      // Top edge enabled
+var pinTopY = pEff(38).value;            // Top Y boundary
+var pinBottomEnabled = pEff(41).value;   // Bottom edge enabled
+var pinBottomY = pEff(42).value;         // Bottom Y boundary
+var pinLeftEnabled = pEff(45).value;     // Left edge enabled
+var pinLeftX = pEff(46).value;           // Left X boundary
+var pinRightEnabled = pEff(49).value;    // Right edge enabled
+var pinRightX = pEff(50).value;          // Right X boundary
 
-// Children follow (indices 37-41) - FLAT INDICES, NOT GROUP ACCESS
-var followPosition = pEff(37).value;
-var followScale = pEff(38).value;
-var followRotation = pEff(39).value;
-var followOpacity = pEff(40).value;
-var followAnchorPoint = pEff(41).value;
+// Children follow (indices 55-59) - FLAT INDICES, NOT GROUP ACCESS
+var followPosition = pEff(55).value;
+var followScale = pEff(56).value;
+var followRotation = pEff(57).value;
+var followOpacity = pEff(58).value;
+var followAnchorPoint = pEff(59).value;
 
-// Delays apply to (indices 46-50) - FLAT INDICES, NOT GROUP ACCESS
-var delayPosition = pEff(46).value;
-var delayScale = pEff(47).value;
-var delayRotation = pEff(48).value;
-var delayOpacity = pEff(49).value;
-var delayAnchorPoint = pEff(50).value;
+// Delays apply to (indices 64-68) - FLAT INDICES, NOT GROUP ACCESS
+var delayPosition = pEff(64).value;
+var delayScale = pEff(65).value;
+var delayRotation = pEff(66).value;
+var delayOpacity = pEff(67).value;
+var delayAnchorPoint = pEff(68).value;
 
-// Child count (index 52)
-var childCount = pEff(52).value;
+// Child count (index 70)
+var childCount = pEff(70).value;
 ```
 
 ### ExtendScript Access (Setting Values)
@@ -500,119 +526,124 @@ With 5 children and Leader index = 3:
 - All three Leader controls are animatable (can change throughout the timeline)
 - Delay Falloff still applies to the calculated base index
 
-## Pin System (Overscroll Stretch)
+## Pin Edges System (Boundary-Based Pinning)
 
-The Pin system provides intuitive control for overscroll stretch effects, where one end of a list stays pinned while the rest stretches.
+The Pin Edges system provides spatial boundary-based pinning for overscroll and collision effects. Instead of pinning based on rest positions, layers are pinned when they cross defined boundary positions on the artboard.
+
+### Why Boundary-Based?
+
+The previous pin system (Pin First/Last) only worked correctly with keyframed parent animations. Moving the parent manually then enabling pinning caused immediate stretching. The boundary-based system is more intuitive: you define WHERE pinning happens (screen edges, UI boundaries, etc.) and the effect activates when layers reach those positions.
 
 ### Controls
 
-#### Pin layer (dropdown: None / First / Last, default: None)
-Which end of the child list to pin in place.
+#### Pin Direction (dropdown: Overscroll Stretch / Collision Squish)
+How the pin effect behaves:
 
-- **None**: No pinning, all children follow parent equally
-- **First**: Pin child at index 1 (first in stack order)
-- **Last**: Pin child at highest index (last in stack order)
+- **Overscroll Stretch**: Pins when a layer would go *past* the boundary (like scroll bounce). The pinned layer stays at the boundary while other layers spread apart.
+- **Collision Squish**: Pins when a layer would go *into* the boundary (like hitting a wall). The pinned layer stops at the boundary while other layers compress together.
 
-#### Pin influence (0-100%, default: 100%)
-How firmly the pinned layer stays in place.
+#### Pin Influence (0-100%, default: 100%)
+How firmly the pinned layer stays at the boundary.
 
-- **100%**: Pinned layer stays completely in place (0% influence)
-- **50%**: Pinned layer moves halfway
-- **0%**: No pinning effect (same as Pin layer = None)
+- **100%**: Pinned layer stays exactly at boundary
+- **50%**: Pinned layer moves halfway past boundary
+- **0%**: No pinning effect
 
-#### Pin trim (0-childCount, default: 0)
-How many layers to exclude from the stretch effect, counted from the **non-pinned end**.
+#### Pin Trim (0-childCount, default: 0)
+How many layers to exclude from the stretch/squish effect.
 
-- **0**: All layers participate in the stretch gradient
-- **N**: Remove N layers from the far end - they follow parent at 100% influence
+- **0**: All layers participate
+- **N**: The N layers furthest from the pinned layer follow the parent normally
 
-### How Stretch Distribution Works
+#### Edge Controls (Top, Bottom, Left, Right)
+Each edge has:
+- **Checkbox**: Enable/disable pinning for this edge
+- **Boundary slider**: The X or Y position where pinning activates
 
-The Pin system creates a **linear gradient** of influence from the pinned layer to the trim point:
+**Defaults:**
+- Top Y: 0 (top of comp)
+- Bottom Y: Comp height
+- Left X: 0 (left of comp)
+- Right X: Comp width
 
-- **Pinned layer**: Stays in place (0% influence when fully pinned)
-- **Layer next to pinned**: MOST stretch (low influence, biggest gap)
-- **Layers further from pinned**: Less stretch (increasing influence)
-- **Layer at trim point**: Minimal stretch (nearly full influence)
-- **Layers beyond trim**: Full influence (100%, follow parent normally)
+### How It Works
 
-**Key insight:** Layers CLOSE to the pinned layer have the BIGGEST gaps (most stretch). Layers FAR from the pinned layer have smaller gaps (less stretch).
+1. **Which layer gets pinned?** Based on the edge:
+   - Top/Left: First layer in list (myIndex = childCount)
+   - Bottom/Right: Last layer in list (myIndex = 1)
 
-### Example: 20 layers, Pin = Last, Trim = 5
+2. **When does pinning activate?**
+   - **Overscroll Stretch**: When the pinned layer's natural position would go *past* the boundary
+   - **Collision Squish**: When the pinned layer's natural position would go *into* the boundary
+
+3. **What happens when active?**
+   - The pinned layer locks to the boundary position
+   - Other layers stretch or squish based on distance from pinned layer
+   - Layers close to pinned layer: biggest effect
+   - Layers far from pinned layer: smallest effect
+   - Layers beyond trim: no effect (follow parent normally)
+
+### Example: Vertical List with Top Pin (Overscroll Stretch)
+
+Setup: 10 layers, Top enabled, Top Y = 100
 
 ```
-Layer 20 (pinned): stays in place (0% influence)
-Layer 19: MOST stretch (low influence, big gap from 20)
-Layer 18: less stretch
-...
-Layer 6 (trim point): minimal stretch (high influence)
-Layers 5-1: follow normally (100% influence, beyond trim)
+Parent at rest: Layer 10 (first) is at Y=100, other layers below
+Parent moves DOWN: Layer 10 would go to Y=150 (below boundary)
+  → Pin activates: Layer 10 stays at Y=100
+  → Layers 9-1 spread apart below it
+
+Parent moves UP: Layer 10 would go to Y=50 (above boundary)
+  → Pin does NOT activate (layer free to move past boundary)
+  → All layers follow parent normally
 ```
 
-When parent moves up → Layer 20 stays put → Layer 19 lags most (big gap) → gaps decrease toward layer 6 → Layers 1-5 follow parent fully.
+### Example: Horizontal Carousel with Left/Right Pins (Collision Squish)
 
-### Example: Pin = First, Pin influence = 50%, Trim = 0
+Setup: 5 cards, Left X=50, Right X=1870, Collision Squish mode
 
 ```
-Layer 1 (pinned at 50%): moves halfway
-Layer 2: MOST stretch (big gap from layer 1)
-...
-Layer 20: minimal stretch (follows almost fully)
+Parent moves LEFT: First card hits Left boundary
+  → First card pins at X=50
+  → Other cards compress together behind it
+
+Parent moves RIGHT: Last card hits Right boundary
+  → Last card pins at X=1870
+  → Other cards compress together in front of it
 ```
 
-### Implementation Formula
+### Implementation
 
-```javascript
-function getPinInfluenceMultiplier(t) {
-    var pinMode = pinModeProp.value;  // 1=None, 2=First, 3=Last
-    if (pinMode === 1) return 1;  // No pinning
-
-    var pinStrength = pinInfluenceProp.valueAtTime(t) / 100;
-    var trim = Math.round(pinTrimProp.valueAtTime(t));
-
-    var pinnedIdx = (pinMode === 2) ? 1 : childCount;
-    var trimEndIdx = (pinMode === 2) ? childCount - trim : 1 + trim;
-
-    // Beyond trim point = full influence
-    if (pinMode === 2 && myIndex > trimEndIdx) return 1;
-    if (pinMode === 3 && myIndex < trimEndIdx) return 1;
-
-    // Pinned layer = low influence (stays in place)
-    if (myIndex === pinnedIdx) return 1 - pinStrength;
-
-    // Square root curve: biggest gap at pinned, smaller gaps toward trim
-    var distFromPinned = Math.abs(myIndex - pinnedIdx);
-    var maxDist = Math.abs(trimEndIdx - pinnedIdx);
-    var normalizedDist = distFromPinned / Math.max(maxDist, 1);
-    var influence = Math.sqrt(normalizedDist);
-
-    return 1 - (1 - influence) * pinStrength;
-}
-```
+The `getPinEdgeState(t, parentRestPos)` function:
+1. Calculates where each edge's pinned layer would naturally be
+2. Checks if any enabled edge's condition is met (overscroll or collision)
+3. Returns the offset needed to pin the layer at the boundary
+4. Position expressions apply this offset with influence gradient
 
 ### Use Cases
-- **Overscroll stretch**: Pin the top/bottom of a list, rest stretches when scrolled past bounds
-- **Elastic scroll indicators**: Visual feedback for scroll limits
-- **Bouncy list animations**: Pin one end, animate parent position with overshoot
-- **Accordion effects**: Pin header, body stretches/compresses
+- **Overscroll bounce**: Enable Top/Bottom with Overscroll Stretch for scroll views
+- **Collision effects**: Enable edges with Collision Squish for lists that compress at boundaries
+- **UI constraints**: Pin elements to screen edges
+- **Carousel limits**: Prevent carousels from scrolling past first/last items
 
 ### Notes
-- All Pin controls are keyframeable
-- Pin system replaces the old Influence Falloff/Curve system
-- Trim is useful for long lists where you only want some layers to stretch
-- Uses square root curve for natural overscroll feel: biggest gap at pinned layer, progressively smaller gaps toward trim point
+- Only one edge can be active at a time (checked in order: Top, Bottom, Left, Right)
+- All controls are keyframeable
+- Boundary values default to comp size at rig time
+- For grids: set same myIndex for entire rows/columns to pin them together
+- Enabling conflicting edges (e.g., both Top and Bottom) may produce unexpected results
 
 ## Delay Falloff
 
 Controls how delay changes for children further from the leader layer.
 
-### Delay Falloff (0-200%, default: 100%)
+### Delay Falloff (-100 to 100, default: 0)
 
-- **100% (default)**: No change - all children use the same delay calculation
-- **>100%**: Children further from leader get MORE delay (exponential increase)
-- **<100%**: Children further from leader get LESS delay (exponential decrease)
+- **0 (default)**: No falloff - all children use equal delay spacing
+- **Positive (1-100)**: Delays compress toward first layers (first layers cluster together, last layers spread apart)
+- **Negative (-1 to -100)**: Delays compress toward last layers (last layers cluster together, first layers spread apart)
 
-Uses a geometric series formula for smooth falloff curves.
+The higher the absolute value, the more pronounced the compression effect. Uses a geometric series formula for smooth falloff curves.
 
 ## Child Pseudo Effect
 
@@ -870,95 +901,3 @@ if (eff.name && eff.name !== "" && eff.numProperties >= 40) {
 ```
 
 If this issue returns, ensure the FFX file in `/assets/presets/` is up to date with the current effect structure.
-
----
-
-## Pin Edges System (Planned Feature)
-
-### Problem with Current Pin System
-
-The current pin system (Pin First/Last) has a limitation: it only works correctly when the parent is animated with keyframes. If you manually move the parent and then enable pinning, the list immediately stretches based on the delta from rest position. This is unintuitive - users expect to enable pinning and then animate to create the stretch effect.
-
-### New Design: Boundary-Based Pinning
-
-Instead of pinning relative to rest position, pin layers to **spatial boundaries** on the artboard. The pinned layer anchors to the boundary position, and other layers stretch/squish relative to it.
-
-### How It Works
-
-1. Enable a pin edge (Top, Bottom, Left, or Right) and set its boundary position
-2. The first or last layer (by index) becomes the "pinned" layer for that edge:
-   - Top/Left: `myIndex = childCount` (first in list)
-   - Bottom/Right: `myIndex = 1` (last in list)
-3. The pinned layer locks to that boundary position
-4. Other layers stretch or squish relative to the pinned layer, with a gradient based on distance
-5. Pin Influence controls how strong the effect is
-6. Pin Trim excludes N layers from the stretch/squish effect
-
-### Pin Direction Modes
-
-**Overscroll Stretch (default):**
-- Pin activates when layer would go *past* boundary (like scroll bounce)
-- Example: Top pin enabled, parent moves down → top layer stays pinned at Top Y boundary, layers below spread apart
-- Parent moves up → top layer is FREE to move up past the boundary, no pinning
-- Use case: Scroll view overscroll bounce effect
-
-**Collision Squish:**
-- Pin activates when layer moves *into* boundary (like hitting a wall)
-- Example: Top pin enabled, parent moves up → top layer hits Top Y and pins there, layers below compress together
-- Parent moves down → top layer is FREE to move down, no pinning
-- Use case: List compressing against a boundary
-
-### New Controls Table
-
-| Control | Type | Default | Range/Options | Notes |
-|---------|------|---------|---------------|-------|
-| Pin Direction | Dropdown | 1 | 1=Overscroll Stretch, 2=Collision Squish | Global mode for all edges |
-| Top | Checkbox | Off | On/Off | Enable top edge pinning |
-| Top Y | Slider | 0 | -10000 to 10000 | Y position of top boundary |
-| Bottom | Checkbox | Off | On/Off | Enable bottom edge pinning |
-| Bottom Y | Slider | 1080 | -10000 to 10000 | Y position of bottom boundary |
-| Left | Checkbox | Off | On/Off | Enable left edge pinning |
-| Left X | Slider | 0 | -10000 to 10000 | X position of left boundary |
-| Right | Checkbox | Off | On/Off | Enable right edge pinning |
-| Right X | Slider | 1920 | -10000 to 10000 | X position of right boundary |
-| Pin Influence | Slider | 100 | 0 to 100 | Strength of pin effect (existing) |
-| Pin Trim | Slider | 0 | 0 to 100 | Layers excluded from effect (existing) |
-
-**Note:** These 9 new controls (1 dropdown + 4 checkboxes + 4 sliders) replace the existing "Pin layer" dropdown. Pin Influence and Pin Trim are retained.
-
-### Behavior Summary
-
-| Mode | Edge | Movement | Result |
-|------|------|----------|--------|
-| Overscroll Stretch | Top | Parent down (top layer would pass Top Y going up) | Top layer pins at Top Y, layers below stretch apart |
-| Overscroll Stretch | Bottom | Parent up (bottom layer would pass Bottom Y going down) | Bottom layer pins at Bottom Y, layers above stretch apart |
-| Collision Squish | Top | Parent up (top layer hits Top Y) | Top layer pins at Top Y, layers squish together |
-| Collision Squish | Bottom | Parent down (bottom layer hits Bottom Y) | Bottom layer pins at Bottom Y, layers squish together |
-
-Same logic applies to Left/Right edges using X positions.
-
-### Grid Support
-
-For grids where you want entire rows/columns to pin together:
-- Manually set the same `myIndex` for all layers in a row (for Top/Bottom pinning)
-- Manually set the same `myIndex` for all layers in a column (for Left/Right pinning)
-- When the first/last index crosses the boundary, all layers with that index pin together
-
-### Edge Cases
-
-Enabling conflicting setups (e.g., vertical list with Left pin, or both Top AND Bottom simultaneously) may produce weird results. These are power-user scenarios - the system won't prevent them, but they may not look sensible. The common cases (vertical list with Top/Bottom, horizontal carousel with Left/Right) work intuitively.
-
-### UI Organization
-
-Controls should be in a collapsible "Pin Edges" group, collapsed by default since this is an advanced feature:
-
-```
-▶ Pin Edges
-  Pin Direction: [Overscroll Stretch ▼]
-  ☐ Top        [Top Y: 0      ]
-  ☐ Bottom     [Bottom Y: 1080]
-  ☐ Left       [Left X: 0     ]
-  ☐ Right      [Right X: 1920 ]
-  Pin Influence: [100%]
-  Pin Trim: [0]
-```
