@@ -870,3 +870,95 @@ if (eff.name && eff.name !== "" && eff.numProperties >= 40) {
 ```
 
 If this issue returns, ensure the FFX file in `/assets/presets/` is up to date with the current effect structure.
+
+---
+
+## Pin Edges System (Planned Feature)
+
+### Problem with Current Pin System
+
+The current pin system (Pin First/Last) has a limitation: it only works correctly when the parent is animated with keyframes. If you manually move the parent and then enable pinning, the list immediately stretches based on the delta from rest position. This is unintuitive - users expect to enable pinning and then animate to create the stretch effect.
+
+### New Design: Boundary-Based Pinning
+
+Instead of pinning relative to rest position, pin layers to **spatial boundaries** on the artboard. The pinned layer anchors to the boundary position, and other layers stretch/squish relative to it.
+
+### How It Works
+
+1. Enable a pin edge (Top, Bottom, Left, or Right) and set its boundary position
+2. The first or last layer (by index) becomes the "pinned" layer for that edge:
+   - Top/Left: `myIndex = childCount` (first in list)
+   - Bottom/Right: `myIndex = 1` (last in list)
+3. The pinned layer locks to that boundary position
+4. Other layers stretch or squish relative to the pinned layer, with a gradient based on distance
+5. Pin Influence controls how strong the effect is
+6. Pin Trim excludes N layers from the stretch/squish effect
+
+### Pin Direction Modes
+
+**Overscroll Stretch (default):**
+- Pin activates when layer would go *past* boundary (like scroll bounce)
+- Example: Top pin enabled, parent moves down → top layer stays pinned at Top Y boundary, layers below spread apart
+- Parent moves up → top layer is FREE to move up past the boundary, no pinning
+- Use case: Scroll view overscroll bounce effect
+
+**Collision Squish:**
+- Pin activates when layer moves *into* boundary (like hitting a wall)
+- Example: Top pin enabled, parent moves up → top layer hits Top Y and pins there, layers below compress together
+- Parent moves down → top layer is FREE to move down, no pinning
+- Use case: List compressing against a boundary
+
+### New Controls Table
+
+| Control | Type | Default | Range/Options | Notes |
+|---------|------|---------|---------------|-------|
+| Pin Direction | Dropdown | 1 | 1=Overscroll Stretch, 2=Collision Squish | Global mode for all edges |
+| Top | Checkbox | Off | On/Off | Enable top edge pinning |
+| Top Y | Slider | 0 | -10000 to 10000 | Y position of top boundary |
+| Bottom | Checkbox | Off | On/Off | Enable bottom edge pinning |
+| Bottom Y | Slider | 1080 | -10000 to 10000 | Y position of bottom boundary |
+| Left | Checkbox | Off | On/Off | Enable left edge pinning |
+| Left X | Slider | 0 | -10000 to 10000 | X position of left boundary |
+| Right | Checkbox | Off | On/Off | Enable right edge pinning |
+| Right X | Slider | 1920 | -10000 to 10000 | X position of right boundary |
+| Pin Influence | Slider | 100 | 0 to 100 | Strength of pin effect (existing) |
+| Pin Trim | Slider | 0 | 0 to 100 | Layers excluded from effect (existing) |
+
+**Note:** These 9 new controls (1 dropdown + 4 checkboxes + 4 sliders) replace the existing "Pin layer" dropdown. Pin Influence and Pin Trim are retained.
+
+### Behavior Summary
+
+| Mode | Edge | Movement | Result |
+|------|------|----------|--------|
+| Overscroll Stretch | Top | Parent down (top layer would pass Top Y going up) | Top layer pins at Top Y, layers below stretch apart |
+| Overscroll Stretch | Bottom | Parent up (bottom layer would pass Bottom Y going down) | Bottom layer pins at Bottom Y, layers above stretch apart |
+| Collision Squish | Top | Parent up (top layer hits Top Y) | Top layer pins at Top Y, layers squish together |
+| Collision Squish | Bottom | Parent down (bottom layer hits Bottom Y) | Bottom layer pins at Bottom Y, layers squish together |
+
+Same logic applies to Left/Right edges using X positions.
+
+### Grid Support
+
+For grids where you want entire rows/columns to pin together:
+- Manually set the same `myIndex` for all layers in a row (for Top/Bottom pinning)
+- Manually set the same `myIndex` for all layers in a column (for Left/Right pinning)
+- When the first/last index crosses the boundary, all layers with that index pin together
+
+### Edge Cases
+
+Enabling conflicting setups (e.g., vertical list with Left pin, or both Top AND Bottom simultaneously) may produce weird results. These are power-user scenarios - the system won't prevent them, but they may not look sensible. The common cases (vertical list with Top/Bottom, horizontal carousel with Left/Right) work intuitively.
+
+### UI Organization
+
+Controls should be in a collapsible "Pin Edges" group, collapsed by default since this is an advanced feature:
+
+```
+▶ Pin Edges
+  Pin Direction: [Overscroll Stretch ▼]
+  ☐ Top        [Top Y: 0      ]
+  ☐ Bottom     [Bottom Y: 1080]
+  ☐ Left       [Left X: 0     ]
+  ☐ Right      [Right X: 1920 ]
+  Pin Influence: [100%]
+  Pin Trim: [0]
+```
