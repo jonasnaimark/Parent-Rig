@@ -121,7 +121,8 @@ function isRiggedParent(layer) {
 
 // Check if a layer is a rigged child
 function isRiggedChild(layer) {
-    return hasEffect(layer, "PR_Index");
+    // Check for old slider format OR pseudo effect (by matchName since name may be empty)
+    return hasEffect(layer, "PR_Index") || hasEffect(layer, "Pseudo/ParentRigChild");
 }
 
 // Check if layer is a null or empty shape layer (doesn't need a rig layer created)
@@ -354,6 +355,11 @@ function addLayersToExistingRig(parent, newChildren, comp) {
         getEffectValue(existingChildren[0], "PR_Parent Rest Scale X"),
         getEffectValue(existingChildren[0], "PR_Parent Rest Scale Y")
     ];
+    if (is3D) {
+        var psz = getEffectValue(existingChildren[0], "PR_Parent Rest Scale Z");
+        if (psz !== null) parentRestScale.push(psz);
+        else parentRestScale.push(100);
+    }
     var parentRestRot = getEffectValue(existingChildren[0], "PR_Parent Rest Rotation");
     var parentRestXRot = is3D ? (getEffectValue(existingChildren[0], "PR_Parent Rest X Rotation") || 0) : 0;
     var parentRestYRot = is3D ? (getEffectValue(existingChildren[0], "PR_Parent Rest Y Rotation") || 0) : 0;
@@ -435,9 +441,25 @@ function addLayersToExistingRig(parent, newChildren, comp) {
 function setEffectValue(layer, effectName, value) {
     try {
         var effects = layer.property("ADBE Effect Parade");
-        for (var i = 1; i <= effects.numProperties; i++) {
-            if (effects.property(i).name === effectName) {
-                effects.property(i).property("Slider").setValue(value);
+
+        // For child effect properties, try pseudo effect first (by matchName since name may be empty)
+        if (effectName.indexOf("PR_") === 0) {
+            var propName = effectName.replace(/^PR_/, "").replace(/_/g, " ");
+            for (var i = 1; i <= effects.numProperties; i++) {
+                var eff = effects.property(i);
+                if (eff.matchName === "Pseudo/ParentRigChild") {
+                    try {
+                        eff.property(propName).setValue(value);
+                        return true;
+                    } catch (e2) {}
+                }
+            }
+        }
+
+        // Fallback to old slider format
+        for (var j = 1; j <= effects.numProperties; j++) {
+            if (effects.property(j).name === effectName) {
+                effects.property(j).property("Slider").setValue(value);
                 return true;
             }
         }
@@ -507,8 +529,9 @@ function findRiggedChildren(parentLayer, comp) {
     var children = [];
     for (var i = 1; i <= comp.numLayers; i++) {
         var layer = comp.layer(i);
-        if (hasEffect(layer, "PR_Index")) {
-            // For single-rig comps, all layers with PR_Index are children of the parent rig
+        // Check for old slider format OR pseudo effect (by matchName since name may be empty)
+        if (hasEffect(layer, "PR_Index") || hasEffect(layer, "Pseudo/ParentRigChild")) {
+            // For single-rig comps, all layers with child effect are children of the parent rig
             // The stored PR_Parent Layer index is unreliable after layer reordering
             children.push(layer);
         }
@@ -519,9 +542,19 @@ function findRiggedChildren(parentLayer, comp) {
 function getEffectValue(layer, effectName) {
     try {
         var effects = layer.property("ADBE Effect Parade");
+        // Check pseudo effect first (by matchName since name may be empty)
         for (var i = 1; i <= effects.numProperties; i++) {
-            if (effects.property(i).name === effectName) {
-                return effects.property(i).property("Slider").value;
+            var eff = effects.property(i);
+            if (eff.matchName === "Pseudo/ParentRigChild") {
+                // Convert "PR_Parent Rest Pos X" -> "Parent Rest Pos X"
+                var propName = effectName.replace(/^PR_/, "").replace(/_/g, " ");
+                try { return eff.property(propName).value; } catch(e) {}
+            }
+        }
+        // Fall back to old slider format
+        for (var j = 1; j <= effects.numProperties; j++) {
+            if (effects.property(j).name === effectName) {
+                return effects.property(j).property("Slider").value;
             }
         }
     } catch (e) {}
@@ -623,10 +656,12 @@ function removeAllPREffects(layer) {
         for (var i = effects.numProperties; i >= 1; i--) {
             var eff = effects.property(i);
             var effectName = eff.name;
-            // Remove PR_ slider effects and the pseudo effect
+            // Remove PR_ slider effects and pseudo effects (both parent and child)
             if (effectName.indexOf("PR_") === 0 ||
                 effectName === "Parent Rig - Parent" ||
-                eff.matchName === "Pseudo/ParentRigParent") {
+                effectName === "Parent Rig - Child" ||
+                eff.matchName === "Pseudo/ParentRigParent" ||
+                eff.matchName === "Pseudo/ParentRigChild") {
                 eff.remove();
             }
         }
@@ -716,9 +751,18 @@ function hasEffect(layer, effectName) {
 function removeEffect(layer, effectName) {
     try {
         var effects = layer.property("ADBE Effect Parade");
+        // Map display names to matchNames for pseudo effects (which may have empty display names)
+        var matchNameMap = {
+            "Parent Rig - Child": "Pseudo/ParentRigChild",
+            "Parent Rig - Parent": "Pseudo/ParentRigParent"
+        };
+        var targetMatchName = matchNameMap[effectName] || null;
+
         for (var i = effects.numProperties; i >= 1; i--) {
-            if (effects.property(i).name === effectName) {
-                effects.property(i).remove();
+            var eff = effects.property(i);
+            // Check by display name OR by matchName (for pseudo effects with empty names)
+            if (eff.name === effectName || (targetMatchName && eff.matchName === targetMatchName)) {
+                eff.remove();
             }
         }
     } catch (e) {}
@@ -734,61 +778,72 @@ function getExistingParentRestValues(children, is3D) {
         var child = children[i];
         var effects = child.property("ADBE Effect Parade");
 
-        // Check if this child has PR_Parent Rest Pos X (meaning it's already rigged)
-        try {
-            var testEffect = effects.property("PR_Parent Rest Pos X");
-            if (testEffect) {
-                // Found an existing rigged child, extract all parent rest values
-                var parentRestPos = [
-                    effects.property("PR_Parent Rest Pos X").property("Slider").value,
-                    effects.property("PR_Parent Rest Pos Y").property("Slider").value
-                ];
-
-                // Check for Z (3D)
-                var zProp = effects.property("PR_Parent Rest Pos Z");
-                if (zProp) {
-                    parentRestPos.push(zProp.property("Slider").value);
-                }
-
-                var parentRestScale = [
-                    effects.property("PR_Parent Rest Scale X").property("Slider").value,
-                    effects.property("PR_Parent Rest Scale Y").property("Slider").value
-                ];
-
-                var parentRestRot = effects.property("PR_Parent Rest Rotation").property("Slider").value;
-
-                var parentRestXRot = 0;
-                var parentRestYRot = 0;
-                if (is3D) {
-                    var xRotProp = effects.property("PR_Parent Rest X Rotation");
-                    var yRotProp = effects.property("PR_Parent Rest Y Rotation");
-                    if (xRotProp) parentRestXRot = xRotProp.property("Slider").value;
-                    if (yRotProp) parentRestYRot = yRotProp.property("Slider").value;
-                }
-
-                var parentRestOpacity = effects.property("PR_Parent Rest Opacity").property("Slider").value;
-
-                var parentRestAnchor = [
-                    effects.property("PR_Parent Rest Anchor X").property("Slider").value,
-                    effects.property("PR_Parent Rest Anchor Y").property("Slider").value
-                ];
-                var zAnchorProp = effects.property("PR_Parent Rest Anchor Z");
-                if (zAnchorProp) {
-                    parentRestAnchor.push(zAnchorProp.property("Slider").value);
-                }
-
-                return {
-                    pos: parentRestPos,
-                    scale: parentRestScale,
-                    rot: parentRestRot,
-                    xRot: parentRestXRot,
-                    yRot: parentRestYRot,
-                    opacity: parentRestOpacity,
-                    anchor: parentRestAnchor
-                };
+        // Helper to get property value from either pseudo effect or old slider format
+        function getChildProp(pseudoEff, name) {
+            if (pseudoEff) {
+                try { return pseudoEff.property(name).value; } catch(e) {}
             }
-        } catch (e) {
-            // This child doesn't have rig effects, try next
+            try { return effects.property("PR_" + name).property("Slider").value; } catch(e) {}
+            return null;
+        }
+
+        // Check for pseudo effect first (by matchName since name may be empty)
+        var pseudoEff = null;
+        for (var j = 1; j <= effects.numProperties; j++) {
+            try {
+                if (effects.property(j).matchName === "Pseudo/ParentRigChild") {
+                    pseudoEff = effects.property(j);
+                    break;
+                }
+            } catch(e) {}
+        }
+
+        var testVal = getChildProp(pseudoEff, "Parent Rest Pos X");
+        if (testVal !== null) {
+            // Found an existing rigged child, extract all parent rest values
+            var parentRestPos = [
+                getChildProp(pseudoEff, "Parent Rest Pos X"),
+                getChildProp(pseudoEff, "Parent Rest Pos Y")
+            ];
+            var zVal = getChildProp(pseudoEff, "Parent Rest Pos Z");
+            if (zVal !== null) parentRestPos.push(zVal);
+
+            var parentRestScale = [
+                getChildProp(pseudoEff, "Parent Rest Scale X"),
+                getChildProp(pseudoEff, "Parent Rest Scale Y")
+            ];
+            if (is3D) {
+                var scaleZ = getChildProp(pseudoEff, "Parent Rest Scale Z");
+                parentRestScale.push(scaleZ !== null ? scaleZ : 100);
+            }
+
+            var parentRestRot = getChildProp(pseudoEff, "Parent Rest Rotation") || 0;
+
+            var parentRestXRot = 0;
+            var parentRestYRot = 0;
+            if (is3D) {
+                parentRestXRot = getChildProp(pseudoEff, "Parent Rest X Rotation") || 0;
+                parentRestYRot = getChildProp(pseudoEff, "Parent Rest Y Rotation") || 0;
+            }
+
+            var parentRestOpacity = getChildProp(pseudoEff, "Parent Rest Opacity") || 100;
+
+            var parentRestAnchor = [
+                getChildProp(pseudoEff, "Parent Rest Anchor X") || 0,
+                getChildProp(pseudoEff, "Parent Rest Anchor Y") || 0
+            ];
+            var zAnchor = getChildProp(pseudoEff, "Parent Rest Anchor Z");
+            if (zAnchor !== null) parentRestAnchor.push(zAnchor);
+
+            return {
+                pos: parentRestPos,
+                scale: parentRestScale,
+                rot: parentRestRot,
+                xRot: parentRestXRot,
+                yRot: parentRestYRot,
+                opacity: parentRestOpacity,
+                anchor: parentRestAnchor
+            };
         }
     }
 
@@ -986,6 +1041,10 @@ function rigParentChildGroup(parent, children, comp) {
 function addParentEffect(layer, childCount) {
     var effects = layer.property("ADBE Effect Parade");
 
+    // Remove any child effect - parent layers should NOT have child effects
+    removeEffect(layer, "Parent Rig - Child");
+    removeEffect(layer, "PR_Index");
+
     // Check if already has parent effect
     if (hasEffect(layer, "Parent Rig - Parent") || hasEffect(layer, "PR_Delay")) {
         return;
@@ -1109,131 +1168,235 @@ function addChildEffect(layer, index, parentLayerIndex,
 
     removeEffect(layer, EFFECT_NAME_CHILD);
 
-    // Use individual slider controls (fallback mode)
-    var indexSlider = effects.addProperty("ADBE Slider Control");
-    indexSlider.name = "PR_Index";
-    indexSlider.property("Slider").setValue(index);
+    var pseudoEffectApplied = false;
+    var eff = null;
 
-    var influence = effects.addProperty("ADBE Slider Control");
-    influence.name = "PR_Influence";
-    influence.property("Slider").setValue(100);
-
-    var parentIdx = effects.addProperty("ADBE Slider Control");
-    parentIdx.name = "PR_Parent Layer";
-    parentIdx.property("Slider").setValue(parentLayerIndex);
-
-    var restPosX = effects.addProperty("ADBE Slider Control");
-    restPosX.name = "PR_Rest Pos X";
-    restPosX.property("Slider").setValue(childPos[0]);
-
-    var restPosY = effects.addProperty("ADBE Slider Control");
-    restPosY.name = "PR_Rest Pos Y";
-    restPosY.property("Slider").setValue(childPos[1]);
-
-    if (childPos.length > 2) {
-        var restPosZ = effects.addProperty("ADBE Slider Control");
-        restPosZ.name = "PR_Rest Pos Z";
-        restPosZ.property("Slider").setValue(childPos[2]);
+    // Helper function to set all child effect values
+    function setChildEffectValues(eff) {
+        eff.property("Index").setValue(index);
+        eff.property("Influence").setValue(100);
+        eff.property("Rest Pos X").setValue(childPos[0]);
+        eff.property("Rest Pos Y").setValue(childPos[1]);
+        eff.property("Rest Pos Z").setValue(childPos.length > 2 ? childPos[2] : 0);
+        eff.property("Rest Scale X").setValue(childScale[0]);
+        eff.property("Rest Scale Y").setValue(childScale[1]);
+        eff.property("Rest Scale Z").setValue(childScale.length > 2 ? childScale[2] : 100);
+        eff.property("Rest Rotation").setValue(childRot);
+        eff.property("Rest Opacity").setValue(childOpacity);
+        eff.property("Rest Anchor X").setValue(childAnchor[0]);
+        eff.property("Rest Anchor Y").setValue(childAnchor[1]);
+        eff.property("Rest Anchor Z").setValue(childAnchor.length > 2 ? childAnchor[2] : 0);
+        eff.property("Parent Rest Pos X").setValue(parentPos[0]);
+        eff.property("Parent Rest Pos Y").setValue(parentPos[1]);
+        eff.property("Parent Rest Pos Z").setValue(parentPos.length > 2 ? parentPos[2] : 0);
+        eff.property("Parent Rest Scale X").setValue(parentScale[0]);
+        eff.property("Parent Rest Scale Y").setValue(parentScale[1]);
+        eff.property("Parent Rest Scale Z").setValue(parentScale.length > 2 ? parentScale[2] : 100);
+        eff.property("Parent Rest Rotation").setValue(parentRot);
+        eff.property("Parent Rest Opacity").setValue(parentOpacity);
+        eff.property("Parent Rest Anchor X").setValue(parentAnchor[0]);
+        eff.property("Parent Rest Anchor Y").setValue(parentAnchor[1]);
+        eff.property("Parent Rest Anchor Z").setValue(parentAnchor.length > 2 ? parentAnchor[2] : 0);
     }
 
-    var restScaleX = effects.addProperty("ADBE Slider Control");
-    restScaleX.name = "PR_Rest Scale X";
-    restScaleX.property("Slider").setValue(childScale[0]);
+    // APPROACH 1: Try FFX preset first (applyPreset uses different AE code path, more reliable on cold start)
+    if (!pseudoEffectApplied && extensionRoot !== "") {
+        var ffxPath = extensionRoot + "/assets/presets/Parent Rig - Child.ffx";
+        var ffxFile = new File(ffxPath);
 
-    var restScaleY = effects.addProperty("ADBE Slider Control");
-    restScaleY.name = "PR_Rest Scale Y";
-    restScaleY.property("Slider").setValue(childScale[1]);
+        if (ffxFile.exists) {
+            var effectCountBefore = effects.numProperties;
+            try {
+                // IMPORTANT: applyPreset can apply to selected layers instead of the target layer
+                // Deselect all, select only target layer, apply, then restore selection
+                var comp = layer.containingComp;
+                var savedSelection = comp.selectedLayers.slice(); // Copy array
+                for (var s = comp.selectedLayers.length - 1; s >= 0; s--) {
+                    comp.selectedLayers[s].selected = false;
+                }
+                layer.selected = true;
+                layer.applyPreset(ffxFile);
+                layer.selected = false;
+                for (var r = 0; r < savedSelection.length; r++) {
+                    savedSelection[r].selected = true;
+                }
 
-    if (childScale.length > 2) {
-        var restScaleZ = effects.addProperty("ADBE Slider Control");
-        restScaleZ.name = "PR_Rest Scale Z";
-        restScaleZ.property("Slider").setValue(childScale[2]);
+                // Find the effect we just applied (by matchName since name may be empty)
+                for (var i = 1; i <= effects.numProperties; i++) {
+                    var testEff = effects.property(i);
+                    if (testEff.matchName === "Pseudo/ParentRigChild") {
+                        eff = testEff;
+                        break;
+                    }
+                }
+
+                if (eff && eff.numProperties >= 24) {
+                    eff.name = "Parent Rig - Child";
+                    setChildEffectValues(eff);
+                    pseudoEffectApplied = true;
+                } else {
+                    // FFX didn't create a valid effect - clean up ANY new effects it may have added
+                    if (eff) {
+                        eff.remove();
+                        eff = null;
+                    }
+                    // Also remove any other effects that appeared (applyPreset can be unpredictable)
+                    for (var j = effects.numProperties; j > effectCountBefore; j--) {
+                        try { effects.property(j).remove(); } catch (e3) {}
+                    }
+                }
+            } catch (e) {}
+        }
     }
 
-    var restRotation = effects.addProperty("ADBE Slider Control");
-    restRotation.name = "PR_Rest Rotation";
-    restRotation.property("Slider").setValue(childRot);
-
-    if (is3D) {
-        var restXRotation = effects.addProperty("ADBE Slider Control");
-        restXRotation.name = "PR_Rest X Rotation";
-        restXRotation.property("Slider").setValue(childXRot);
-
-        var restYRotation = effects.addProperty("ADBE Slider Control");
-        restYRotation.name = "PR_Rest Y Rotation";
-        restYRotation.property("Slider").setValue(childYRot);
+    // APPROACH 2: Try addProperty (uses PresetEffects.xml directly)
+    if (!pseudoEffectApplied) {
+        try {
+            eff = effects.addProperty("Pseudo/ParentRigChild");
+            if (eff && eff.numProperties >= 24) {
+                eff.name = "Parent Rig - Child";
+                setChildEffectValues(eff);
+                pseudoEffectApplied = true;
+            } else if (eff) {
+                eff.remove();
+                eff = null;
+            }
+        } catch (e) {}
     }
 
-    var restOpacity = effects.addProperty("ADBE Slider Control");
-    restOpacity.name = "PR_Rest Opacity";
-    restOpacity.property("Slider").setValue(childOpacity);
+    // Fallback: Use individual slider controls
+    if (!pseudoEffectApplied) {
+        var indexSlider = effects.addProperty("ADBE Slider Control");
+        indexSlider.name = "PR_Index";
+        indexSlider.property("Slider").setValue(index);
 
-    var restAnchorX = effects.addProperty("ADBE Slider Control");
-    restAnchorX.name = "PR_Rest Anchor X";
-    restAnchorX.property("Slider").setValue(childAnchor[0]);
+        var influence = effects.addProperty("ADBE Slider Control");
+        influence.name = "PR_Influence";
+        influence.property("Slider").setValue(100);
 
-    var restAnchorY = effects.addProperty("ADBE Slider Control");
-    restAnchorY.name = "PR_Rest Anchor Y";
-    restAnchorY.property("Slider").setValue(childAnchor[1]);
+        var parentIdx = effects.addProperty("ADBE Slider Control");
+        parentIdx.name = "PR_Parent Layer";
+        parentIdx.property("Slider").setValue(parentLayerIndex);
 
-    if (childAnchor.length > 2) {
-        var restAnchorZ = effects.addProperty("ADBE Slider Control");
-        restAnchorZ.name = "PR_Rest Anchor Z";
-        restAnchorZ.property("Slider").setValue(childAnchor[2]);
-    }
+        var restPosX = effects.addProperty("ADBE Slider Control");
+        restPosX.name = "PR_Rest Pos X";
+        restPosX.property("Slider").setValue(childPos[0]);
 
-    var parentPosX = effects.addProperty("ADBE Slider Control");
-    parentPosX.name = "PR_Parent Rest Pos X";
-    parentPosX.property("Slider").setValue(parentPos[0]);
+        var restPosY = effects.addProperty("ADBE Slider Control");
+        restPosY.name = "PR_Rest Pos Y";
+        restPosY.property("Slider").setValue(childPos[1]);
 
-    var parentPosY = effects.addProperty("ADBE Slider Control");
-    parentPosY.name = "PR_Parent Rest Pos Y";
-    parentPosY.property("Slider").setValue(parentPos[1]);
+        if (childPos.length > 2) {
+            var restPosZ = effects.addProperty("ADBE Slider Control");
+            restPosZ.name = "PR_Rest Pos Z";
+            restPosZ.property("Slider").setValue(childPos[2]);
+        }
 
-    if (parentPos.length > 2) {
-        var parentPosZ = effects.addProperty("ADBE Slider Control");
-        parentPosZ.name = "PR_Parent Rest Pos Z";
-        parentPosZ.property("Slider").setValue(parentPos[2]);
-    }
+        var restScaleX = effects.addProperty("ADBE Slider Control");
+        restScaleX.name = "PR_Rest Scale X";
+        restScaleX.property("Slider").setValue(childScale[0]);
 
-    var parentScaleX = effects.addProperty("ADBE Slider Control");
-    parentScaleX.name = "PR_Parent Rest Scale X";
-    parentScaleX.property("Slider").setValue(parentScale[0]);
+        var restScaleY = effects.addProperty("ADBE Slider Control");
+        restScaleY.name = "PR_Rest Scale Y";
+        restScaleY.property("Slider").setValue(childScale[1]);
 
-    var parentScaleY = effects.addProperty("ADBE Slider Control");
-    parentScaleY.name = "PR_Parent Rest Scale Y";
-    parentScaleY.property("Slider").setValue(parentScale[1]);
+        if (childScale.length > 2) {
+            var restScaleZ = effects.addProperty("ADBE Slider Control");
+            restScaleZ.name = "PR_Rest Scale Z";
+            restScaleZ.property("Slider").setValue(childScale[2]);
+        }
 
-    var parentRotation = effects.addProperty("ADBE Slider Control");
-    parentRotation.name = "PR_Parent Rest Rotation";
-    parentRotation.property("Slider").setValue(parentRot);
+        var restRotation = effects.addProperty("ADBE Slider Control");
+        restRotation.name = "PR_Rest Rotation";
+        restRotation.property("Slider").setValue(childRot);
 
-    if (is3D) {
-        var parentXRotation = effects.addProperty("ADBE Slider Control");
-        parentXRotation.name = "PR_Parent Rest X Rotation";
-        parentXRotation.property("Slider").setValue(parentXRot);
+        if (is3D) {
+            var restXRotation = effects.addProperty("ADBE Slider Control");
+            restXRotation.name = "PR_Rest X Rotation";
+            restXRotation.property("Slider").setValue(childXRot);
 
-        var parentYRotation = effects.addProperty("ADBE Slider Control");
-        parentYRotation.name = "PR_Parent Rest Y Rotation";
-        parentYRotation.property("Slider").setValue(parentYRot);
-    }
+            var restYRotation = effects.addProperty("ADBE Slider Control");
+            restYRotation.name = "PR_Rest Y Rotation";
+            restYRotation.property("Slider").setValue(childYRot);
+        }
 
-    var parentOpacitySlider = effects.addProperty("ADBE Slider Control");
-    parentOpacitySlider.name = "PR_Parent Rest Opacity";
-    parentOpacitySlider.property("Slider").setValue(parentOpacity);
+        var restOpacity = effects.addProperty("ADBE Slider Control");
+        restOpacity.name = "PR_Rest Opacity";
+        restOpacity.property("Slider").setValue(childOpacity);
 
-    var parentAnchorX = effects.addProperty("ADBE Slider Control");
-    parentAnchorX.name = "PR_Parent Rest Anchor X";
-    parentAnchorX.property("Slider").setValue(parentAnchor[0]);
+        var restAnchorX = effects.addProperty("ADBE Slider Control");
+        restAnchorX.name = "PR_Rest Anchor X";
+        restAnchorX.property("Slider").setValue(childAnchor[0]);
 
-    var parentAnchorY = effects.addProperty("ADBE Slider Control");
-    parentAnchorY.name = "PR_Parent Rest Anchor Y";
-    parentAnchorY.property("Slider").setValue(parentAnchor[1]);
+        var restAnchorY = effects.addProperty("ADBE Slider Control");
+        restAnchorY.name = "PR_Rest Anchor Y";
+        restAnchorY.property("Slider").setValue(childAnchor[1]);
 
-    if (parentAnchor.length > 2) {
-        var parentAnchorZ = effects.addProperty("ADBE Slider Control");
-        parentAnchorZ.name = "PR_Parent Rest Anchor Z";
-        parentAnchorZ.property("Slider").setValue(parentAnchor[2]);
+        if (childAnchor.length > 2) {
+            var restAnchorZ = effects.addProperty("ADBE Slider Control");
+            restAnchorZ.name = "PR_Rest Anchor Z";
+            restAnchorZ.property("Slider").setValue(childAnchor[2]);
+        }
+
+        var parentPosX = effects.addProperty("ADBE Slider Control");
+        parentPosX.name = "PR_Parent Rest Pos X";
+        parentPosX.property("Slider").setValue(parentPos[0]);
+
+        var parentPosY = effects.addProperty("ADBE Slider Control");
+        parentPosY.name = "PR_Parent Rest Pos Y";
+        parentPosY.property("Slider").setValue(parentPos[1]);
+
+        if (parentPos.length > 2) {
+            var parentPosZ = effects.addProperty("ADBE Slider Control");
+            parentPosZ.name = "PR_Parent Rest Pos Z";
+            parentPosZ.property("Slider").setValue(parentPos[2]);
+        }
+
+        var parentScaleX = effects.addProperty("ADBE Slider Control");
+        parentScaleX.name = "PR_Parent Rest Scale X";
+        parentScaleX.property("Slider").setValue(parentScale[0]);
+
+        var parentScaleY = effects.addProperty("ADBE Slider Control");
+        parentScaleY.name = "PR_Parent Rest Scale Y";
+        parentScaleY.property("Slider").setValue(parentScale[1]);
+
+        if (is3D) {
+            var parentScaleZ = effects.addProperty("ADBE Slider Control");
+            parentScaleZ.name = "PR_Parent Rest Scale Z";
+            parentScaleZ.property("Slider").setValue(parentScale.length > 2 ? parentScale[2] : 100);
+        }
+
+        var parentRotation = effects.addProperty("ADBE Slider Control");
+        parentRotation.name = "PR_Parent Rest Rotation";
+        parentRotation.property("Slider").setValue(parentRot);
+
+        if (is3D) {
+            var parentXRotation = effects.addProperty("ADBE Slider Control");
+            parentXRotation.name = "PR_Parent Rest X Rotation";
+            parentXRotation.property("Slider").setValue(parentXRot);
+
+            var parentYRotation = effects.addProperty("ADBE Slider Control");
+            parentYRotation.name = "PR_Parent Rest Y Rotation";
+            parentYRotation.property("Slider").setValue(parentYRot);
+        }
+
+        var parentOpacitySlider = effects.addProperty("ADBE Slider Control");
+        parentOpacitySlider.name = "PR_Parent Rest Opacity";
+        parentOpacitySlider.property("Slider").setValue(parentOpacity);
+
+        var parentAnchorX = effects.addProperty("ADBE Slider Control");
+        parentAnchorX.name = "PR_Parent Rest Anchor X";
+        parentAnchorX.property("Slider").setValue(parentAnchor[0]);
+
+        var parentAnchorY = effects.addProperty("ADBE Slider Control");
+        parentAnchorY.name = "PR_Parent Rest Anchor Y";
+        parentAnchorY.property("Slider").setValue(parentAnchor[1]);
+
+        if (parentAnchor.length > 2) {
+            var parentAnchorZ = effects.addProperty("ADBE Slider Control");
+            parentAnchorZ.name = "PR_Parent Rest Anchor Z";
+            parentAnchorZ.property("Slider").setValue(parentAnchor[2]);
+        }
     }
 }
 
@@ -1257,11 +1420,16 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
     }
 
     // Common expression header - supports both pseudo effect and slider fallback
-    // Detect which effect type is on the parent and get property references
+    // Detect which effect type is on the parent (check by matchName since name may be empty)
     var usePseudoEffect = false;
     try {
-        var testEff = parent.property("ADBE Effect Parade").property("Parent Rig - Parent");
-        if (testEff) usePseudoEffect = true;
+        var parentEffects = parent.property("ADBE Effect Parade");
+        for (var pe = 1; pe <= parentEffects.numProperties; pe++) {
+            if (parentEffects.property(pe).matchName === "Pseudo/ParentRigParent") {
+                usePseudoEffect = true;
+                break;
+            }
+        }
     } catch (e) {}
 
     var parentNameEscaped = parent.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -1271,12 +1439,32 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         header = [
             '// Parent Rig Expression (Pseudo Effect Mode)',
             'var parentLayer = thisComp.layer("' + parentNameEscaped + '");',
-            'var pr = effect;',
             'var pEff = parentLayer.effect("Parent Rig - Parent");',
             '',
-            '// Get rig parameters from pseudo effect',
-            'var myIndex = 1; try { myIndex = pr("PR_Index")("Slider").value; } catch(e) {}',
-            'var childInfluence = 1; try { childInfluence = pr("PR_Influence")("Slider").value / 100; } catch(e) {}',
+            '// Child effect - access by name (set in addChildEffect)',
+            'var cEff = null;',
+            'try { cEff = thisLayer.effect("Parent Rig - Child"); } catch(e) {}',
+            '// Property index map for child pseudo effect (names may be empty due to localization)',
+            'var cpIdx = {',
+            '    "Index": 1, "Influence": 2,',
+            '    "Rest Pos X": 3, "Rest Pos Y": 4, "Rest Pos Z": 5,',
+            '    "Rest Scale X": 6, "Rest Scale Y": 7, "Rest Scale Z": 8,',
+            '    "Rest Rotation": 9, "Rest Opacity": 10,',
+            '    "Rest Anchor X": 11, "Rest Anchor Y": 12, "Rest Anchor Z": 13,',
+            '    "Parent Rest Pos X": 14, "Parent Rest Pos Y": 15, "Parent Rest Pos Z": 16,',
+            '    "Parent Rest Scale X": 17, "Parent Rest Scale Y": 18, "Parent Rest Scale Z": 19,',
+            '    "Parent Rest Rotation": 20, "Parent Rest Opacity": 21,',
+            '    "Parent Rest Anchor X": 22, "Parent Rest Anchor Y": 23, "Parent Rest Anchor Z": 24',
+            '};',
+            'function cp(name) {',
+            '    if (cEff && cpIdx[name]) { try { return cEff(cpIdx[name]).value; } catch(e) {} }',
+            '    try { return effect("PR_" + name)("Slider").value; } catch(e) {}',
+            '    return 0;',
+            '}',
+            '',
+            '// Get rig parameters from child effect',
+            'var myIndex = cp("Index") || 1;',
+            'var childInfluence = (cp("Influence") || 100) / 100;',
             '',
             '// Delay section (indices 3-5)',
             'var delayProp = pEff(3);',
@@ -1303,16 +1491,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             'var scaleAroundMode = pEff(32).value;',
             'var rotateAroundMode = pEff(33).value;',
             '',
-            '// Find leader layer by searching for the child with matching PR_Index',
+            '// Find leader layer by searching for the child with matching Index',
             'function findLeaderLayer() {',
             '    var leaderIdx = Math.round(leaderIndexProp.valueAtTime(time));',
             '    for (var i = 1; i <= thisComp.numLayers; i++) {',
             '        try {',
             '            var layer = thisComp.layer(i);',
-            '            var indexEffect = layer.effect("PR_Index");',
-            '            if (indexEffect && Math.round(indexEffect("Slider").value) === leaderIdx) {',
-            '                return layer;',
-            '            }',
+            '            // Try child pseudo effect by name',
+            '            try {',
+            '                var childEff = layer.effect("Parent Rig - Child");',
+            '                if (childEff && Math.round(childEff("Index").value) === leaderIdx) return layer;',
+            '            } catch(e) {}',
+            '            // Fallback to old slider',
+            '            var indexEff = layer.effect("PR_Index");',
+            '            if (indexEff && Math.round(indexEff("Slider").value) === leaderIdx) return layer;',
             '        } catch(e) {}',
             '    }',
             '    return null;',
@@ -1414,11 +1606,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    baseIndex = myIndex;',  // Default/separator
             '}',
             '',
-            '// Apply reverse order blend',
-            'var ro = reverseOrderProp.value / 100;',
+            '// For reverse order calculation',
             'var reversedIndex = childCount + 1 - baseIndex;',
-            'var topToBottomIndex = baseIndex + (reversedIndex - baseIndex) * ro;',
-            'var bottomToTopIndex = childCount + 1 - topToBottomIndex;',
             '',
             '// Calculate effective index with delay falloff (geometric series)',
             'function getEffectiveIndex(baseIdx, falloff) {',
@@ -1468,9 +1657,9 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    var baseIdx;',
             '    ',
             '    if (leaderIdx <= 1) {',
-            '        // Standard mode: use reverse order (and randomization if enabled)',
-            '        var ro = reverseOrderProp.valueAtTime(t);',
-            '        baseIdx = topToBottomIndex + (bottomToTopIndex - topToBottomIndex) * (ro / 100);',
+            '        // Standard mode: use reverse order (blend from normal to reversed)',
+            '        var roVal = reverseOrderProp.valueAtTime(t) / 100;',
+            '        baseIdx = baseIndex + (reversedIndex - baseIndex) * roVal;',
             '    } else {',
             '        // Leader mode: calculate distance from leader (ignores randomization)',
             '        var beforeMult = delayBeforeLeaderProp.valueAtTime(t) / 100;',
@@ -1503,11 +1692,31 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         header = [
             '// Parent Rig Expression (Slider Fallback Mode)',
             'var parentLayer = thisComp.layer("' + parentNameEscaped + '");',
-            'var pr = effect;',
+            '',
+            '// Child effect - access by name (set in addChildEffect)',
+            'var cEff = null;',
+            'try { cEff = thisLayer.effect("Parent Rig - Child"); } catch(e) {}',
+            '// Property index map for child pseudo effect (names may be empty due to localization)',
+            'var cpIdx = {',
+            '    "Index": 1, "Influence": 2,',
+            '    "Rest Pos X": 3, "Rest Pos Y": 4, "Rest Pos Z": 5,',
+            '    "Rest Scale X": 6, "Rest Scale Y": 7, "Rest Scale Z": 8,',
+            '    "Rest Rotation": 9, "Rest Opacity": 10,',
+            '    "Rest Anchor X": 11, "Rest Anchor Y": 12, "Rest Anchor Z": 13,',
+            '    "Parent Rest Pos X": 14, "Parent Rest Pos Y": 15, "Parent Rest Pos Z": 16,',
+            '    "Parent Rest Scale X": 17, "Parent Rest Scale Y": 18, "Parent Rest Scale Z": 19,',
+            '    "Parent Rest Rotation": 20, "Parent Rest Opacity": 21,',
+            '    "Parent Rest Anchor X": 22, "Parent Rest Anchor Y": 23, "Parent Rest Anchor Z": 24',
+            '};',
+            'function cp(name) {',
+            '    if (cEff && cpIdx[name]) { try { return cEff(cpIdx[name]).value; } catch(e) {} }',
+            '    try { return effect("PR_" + name)("Slider").value; } catch(e) {}',
+            '    return 0;',
+            '}',
             '',
             '// Get rig parameters from slider controls',
-            'var myIndex = pr("PR_Index")("Slider").value;',
-            'var influence = pr("PR_Influence")("Slider").value / 100;',
+            'var myIndex = cp("Index") || 1;',
+            'var childInfluence = (cp("Influence") || 100) / 100;',
             'var delayProp = parentLayer.effect("PR_Delay")("Slider");',
             'var stretchProp = parentLayer.effect("PR_Delay Stretch")("Slider");',
             'var reverseOrderProp = parentLayer.effect("PR_Reverse Order")("Slider");',
@@ -1567,9 +1776,9 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    var baseIdx;',
             '    ',
             '    if (leaderIdx <= 1) {',
-            '        // Standard mode: use reverse order (and randomization if enabled)',
-            '        var ro = reverseOrderProp.valueAtTime(t);',
-            '        baseIdx = topToBottomIndex + (bottomToTopIndex - topToBottomIndex) * (ro / 100);',
+            '        // Standard mode: use reverse order (blend from normal to reversed)',
+            '        var roVal = reverseOrderProp.valueAtTime(t) / 100;',
+            '        baseIdx = baseIndex + (reversedIndex - baseIndex) * roVal;',
             '    } else {',
             '        // Leader mode: calculate distance from leader (ignores randomization)',
             '        var beforeMult = delayBeforeLeaderProp.valueAtTime(t) / 100;',
@@ -1603,7 +1812,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
     // Time remapping function
     var timeRemapFunc = [
         '// Time remapping with crossfade blending for overlapping segments',
-        'var influencePropGlobal = pr("PR_Influence")("Slider");',
+        '// Find influence property from child effect or slider fallback',
+        'var influencePropGlobal = null;',
+        'try { influencePropGlobal = thisLayer.effect("Parent Rig - Child")("Influence"); } catch(e) {}',
+        'if (!influencePropGlobal) { try { influencePropGlobal = effect("PR_Influence")("Slider"); } catch(e) {} }',
         '',
         '// Build child segments from property keyframes',
         'function buildChildSegs(prop) {',
@@ -1650,7 +1862,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         '        var seg = mergedSegments[i];',
         '        var segDelayValue = delayProp.valueAtTime(seg.start);',
         '        var segEffIdx = getEffectiveIndexAtTime(seg.start);',
-        '        var segDelay = segDelayValue * segEffIdx * thisComp.frameDuration;',
+        '        var segDelay = applyDelayToThisTransform ? segDelayValue * segEffIdx * thisComp.frameDuration : 0;',
         '        var segStretch = getStretchAtTime(seg.start);',
         '        var childStart = seg.start + segDelay;',
         '        var childDur = seg.isAnim ? seg.dur + segStretch : seg.dur;',
@@ -1922,10 +2134,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayPosition;',
         '',
         '// Position calculation with accumulated influence',
-        'var restPos = [pr("PR_Rest Pos X")("Slider").value, pr("PR_Rest Pos Y")("Slider").value' + (is3D ? ', pr("PR_Rest Pos Z")("Slider").value' : '') + '];',
-        'var parentRestPos = [pr("PR_Parent Rest Pos X")("Slider").value, pr("PR_Parent Rest Pos Y")("Slider").value' + (is3D ? ', pr("PR_Parent Rest Pos Z")("Slider").value' : '') + '];',
-        'var parentRestScale = [pr("PR_Parent Rest Scale X")("Slider").value, pr("PR_Parent Rest Scale Y")("Slider").value];',
-        'var parentRestRot = pr("PR_Parent Rest Rotation")("Slider").value;',
+        'var restPos = [cp("Rest Pos X"), cp("Rest Pos Y")' + (is3D ? ', cp("Rest Pos Z")' : '') + '];',
+        'var parentRestPos = [cp("Parent Rest Pos X"), cp("Parent Rest Pos Y")' + (is3D ? ', cp("Parent Rest Pos Z")' : '') + '];',
+        'var parentRestScale = [cp("Parent Rest Scale X"), cp("Parent Rest Scale Y")' + (is3D ? ', cp("Parent Rest Scale Z")' : '') + '];',
+        'var parentRestRot = cp("Parent Rest Rotation");',
         '',
         '// Get accumulated delta from all segments, weighted by each segment\'s influence',
         'var posProp = parentLayer.transform.position;',
@@ -2013,8 +2225,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayScale;',
         '',
         '// Scale calculation with time remapping',
-        'var restScale = [pr("PR_Rest Scale X")("Slider").value, pr("PR_Rest Scale Y")("Slider").value' + (is3D ? ', pr("PR_Rest Scale Z")("Slider").value' : '') + '];',
-        'var parentRestScale = [pr("PR_Parent Rest Scale X")("Slider").value, pr("PR_Parent Rest Scale Y")("Slider").value' + (is3D ? ', 100' : '') + '];',
+        'var restScale = [cp("Rest Scale X"), cp("Rest Scale Y")' + (is3D ? ', cp("Rest Scale Z")' : '') + '];',
+        'var parentRestScale = [cp("Parent Rest Scale X"), cp("Parent Rest Scale Y")' + (is3D ? ', cp("Parent Rest Scale Z")' : '') + '];',
         '',
         '// Get parent scale using time remapping',
         'var scaleProp = parentLayer.transform.scale;',
@@ -2049,8 +2261,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayRotation;',
         '',
         '// Rotation calculation with accumulated influence',
-        'var restRot = pr("PR_Rest Rotation")("Slider").value;',
-        'var parentRestRot = pr("PR_Parent Rest Rotation")("Slider").value;',
+        'var restRot = cp("Rest Rotation");',
+        'var parentRestRot = cp("Parent Rest Rotation");',
         '',
         '// Get accumulated rotation delta from all segments, weighted by each segment\'s influence',
         'var rotProp = parentLayer.transform.rotation;',
@@ -2078,8 +2290,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayRotation;',
         '',
         '// X Rotation calculation with accumulated influence',
-        'var restRot = pr("PR_Rest X Rotation")("Slider").value;',
-        'var parentRestRot = pr("PR_Parent Rest X Rotation")("Slider").value;',
+        'var restRot = cp("Rest X Rotation");',
+        'var parentRestRot = cp("Parent Rest X Rotation");',
         '',
         '// Get accumulated X rotation delta from all segments',
         'var rotProp = parentLayer.transform.xRotation;',
@@ -2107,8 +2319,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayRotation;',
         '',
         '// Y Rotation calculation with accumulated influence',
-        'var restRot = pr("PR_Rest Y Rotation")("Slider").value;',
-        'var parentRestRot = pr("PR_Parent Rest Y Rotation")("Slider").value;',
+        'var restRot = cp("Rest Y Rotation");',
+        'var parentRestRot = cp("Parent Rest Y Rotation");',
         '',
         '// Get accumulated Y rotation delta from all segments',
         'var rotProp = parentLayer.transform.yRotation;',
@@ -2136,8 +2348,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayOpacity;',
         '',
         '// Opacity calculation with accumulated influence',
-        'var restOpacity = pr("PR_Rest Opacity")("Slider").value;',
-        'var parentRestOpacity = pr("PR_Parent Rest Opacity")("Slider").value;',
+        'var restOpacity = cp("Rest Opacity");',
+        'var parentRestOpacity = cp("Parent Rest Opacity");',
         '',
         '// Get accumulated opacity delta from all segments, weighted by each segment\'s influence',
         'var opacityProp = parentLayer.transform.opacity;',
@@ -2168,8 +2380,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'applyDelayToThisTransform = delayAnchorPoint;',
         '',
         '// Anchor Point calculation with accumulated influence',
-        'var restAnchor = [pr("PR_Rest Anchor X")("Slider").value, pr("PR_Rest Anchor Y")("Slider").value' + (is3D ? ', pr("PR_Rest Anchor Z")("Slider").value' : '') + '];',
-        'var parentRestAnchor = [pr("PR_Parent Rest Anchor X")("Slider").value, pr("PR_Parent Rest Anchor Y")("Slider").value' + (is3D ? ', pr("PR_Parent Rest Anchor Z")("Slider").value' : '') + '];',
+        'var restAnchor = [cp("Rest Anchor X"), cp("Rest Anchor Y")' + (is3D ? ', cp("Rest Anchor Z")' : '') + '];',
+        'var parentRestAnchor = [cp("Parent Rest Anchor X"), cp("Parent Rest Anchor Y")' + (is3D ? ', cp("Parent Rest Anchor Z")' : '') + '];',
         '',
         '// Get accumulated anchor delta from all segments, weighted by each segment\'s influence',
         'var anchorProp = parentLayer.transform.anchorPoint;',
@@ -2232,16 +2444,17 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D) {
         'applyDelayToThisTransform = delayPosition;',
         '',
         '// ' + axis + ' Position calculation (split dimensions) with accumulated influence',
-        'var restPos = pr("PR_Rest Pos ' + axis + '")("Slider").value;',
-        'var parentRestPos = pr("PR_Parent Rest Pos ' + axis + '")("Slider").value;',
+        'var restPos = cp("Rest Pos ' + axis + '");',
+        'var parentRestPos = cp("Parent Rest Pos ' + axis + '");',
         // For transform around parent with rotation, we need both X and Y
-        (needsBothAxes ? 'var restPosX = pr("PR_Rest Pos X")("Slider").value;' : ''),
-        (needsBothAxes ? 'var restPosY = pr("PR_Rest Pos Y")("Slider").value;' : ''),
-        (needsBothAxes ? 'var parentRestPosX = pr("PR_Parent Rest Pos X")("Slider").value;' : ''),
-        (needsBothAxes ? 'var parentRestPosY = pr("PR_Parent Rest Pos Y")("Slider").value;' : ''),
-        'var parentRestScaleX = pr("PR_Parent Rest Scale X")("Slider").value;',
-        'var parentRestScaleY = pr("PR_Parent Rest Scale Y")("Slider").value;',
-        'var parentRestRot = pr("PR_Parent Rest Rotation")("Slider").value;',
+        (needsBothAxes ? 'var restPosX = cp("Rest Pos X");' : ''),
+        (needsBothAxes ? 'var restPosY = cp("Rest Pos Y");' : ''),
+        (needsBothAxes ? 'var parentRestPosX = cp("Parent Rest Pos X");' : ''),
+        (needsBothAxes ? 'var parentRestPosY = cp("Parent Rest Pos Y");' : ''),
+        'var parentRestScaleX = cp("Parent Rest Scale X");',
+        'var parentRestScaleY = cp("Parent Rest Scale Y");',
+        (is3D ? 'var parentRestScaleZ = cp("Parent Rest Scale Z");' : ''),
+        'var parentRestRot = cp("Parent Rest Rotation");',
         '',
         '// Get accumulated delta from all segments, weighted by each segment\'s influence',
         'var posProp = parentLayer.transform.' + propName + ';',

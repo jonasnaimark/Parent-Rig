@@ -614,12 +614,127 @@ Controls how delay changes for children further from the leader layer.
 
 Uses a geometric series formula for smooth falloff curves.
 
-## Child Pseudo Effect (TODO)
+## Child Pseudo Effect
 
-When creating the Child pseudo effect, remember:
-- Each label group adds an endLabel that takes an index
-- Count all labels and endLabels to determine correct property indices
-- The Child effect will need: Index, Influence, Parent Layer reference, and all the Rest/Parent Rest values for each transform property
+The Child pseudo effect (`Pseudo/ParentRigChild`) stores rest values for each child layer.
+
+### Structure (24 properties)
+
+| Index | Property Name | Visible | Default |
+|-------|---------------|---------|---------|
+| 1 | Index | Yes | 1 |
+| 2 | Influence | Yes | 100% |
+| 3 | Rest Pos X | No | 0 |
+| 4 | Rest Pos Y | No | 0 |
+| 5 | Rest Pos Z | No | 0 |
+| 6 | Rest Scale X | No | 100% |
+| 7 | Rest Scale Y | No | 100% |
+| 8 | Rest Scale Z | No | 100% |
+| 9 | Rest Rotation | No | 0 |
+| 10 | Rest Opacity | No | 100% |
+| 11 | Rest Anchor X | No | 0 |
+| 12 | Rest Anchor Y | No | 0 |
+| 13 | Rest Anchor Z | No | 0 |
+| 14 | Parent Rest Pos X | No | 0 |
+| 15 | Parent Rest Pos Y | No | 0 |
+| 16 | Parent Rest Pos Z | No | 0 |
+| 17 | Parent Rest Scale X | No | 100% |
+| 18 | Parent Rest Scale Y | No | 100% |
+| 19 | Parent Rest Scale Z | No | 100% |
+| 20 | Parent Rest Rotation | No | 0 |
+| 21 | Parent Rest Opacity | No | 100% |
+| 22 | Parent Rest Anchor X | No | 0 |
+| 23 | Parent Rest Anchor Y | No | 0 |
+| 24 | Parent Rest Anchor Z | No | 0 |
+
+### File Locations
+
+| File | Path |
+|------|------|
+| PresetEffects.xml | Same as Parent effect |
+| FFX (Pseudo Effect Maker) | `/Users/jonas_naimark/Library/CloudStorage/GoogleDrive-jonas.naimark@airbnb.com/My Drive/Scripts and Prototypes/Parent Rig/Parent Rig - Child.ffx` |
+| FFX (extension assets) | `/Users/jonas_naimark/Documents/ParentRig-CEP/assets/presets/Parent Rig - Child.ffx` |
+
+### Python Update Script
+
+Save as `/tmp/update_child_effect.py`:
+
+```python
+preset_file = '/Applications/Adobe After Effects 2024/Adobe After Effects 2024.app/Contents/Frameworks/aelib.framework/Versions/A/Resources/xml/PresetEffects.xml'
+
+new_effect = '''  <Effect matchname="Pseudo/ParentRigChild" name="$$/AE/Preset/ParentRigChild=Parent Rig - Child">
+    <Slider name="$$/AE/Preset/Index1=Index" default="1" valid_min="1" valid_max="999" slider_min="1" slider_max="10" precision="0" />
+    <Slider name="$$/AE/Preset/Influence1=Influence" default="100" valid_min="0" valid_max="100" slider_min="0" slider_max="100" precision="0" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/RestPosX1=Rest Pos X" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/RestPosY1=Rest Pos Y" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/RestPosZ1=Rest Pos Z" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/RestScaleX1=Rest Scale X" INVISIBLE="true" default="100" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/RestScaleY1=Rest Scale Y" INVISIBLE="true" default="100" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/RestScaleZ1=Rest Scale Z" INVISIBLE="true" default="100" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/RestRotation1=Rest Rotation" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/RestOpacity1=Rest Opacity" INVISIBLE="true" default="100" valid_min="0" valid_max="100" slider_min="0" slider_max="100" precision="0" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/RestAnchorX1=Rest Anchor X" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/RestAnchorY1=Rest Anchor Y" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/RestAnchorZ1=Rest Anchor Z" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestPosX1=Parent Rest Pos X" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestPosY1=Parent Rest Pos Y" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestPosZ1=Parent Rest Pos Z" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestScaleX1=Parent Rest Scale X" INVISIBLE="true" default="100" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/ParentRestScaleY1=Parent Rest Scale Y" INVISIBLE="true" default="100" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/ParentRestScaleZ1=Parent Rest Scale Z" INVISIBLE="true" default="100" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/ParentRestRotation1=Parent Rest Rotation" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestOpacity1=Parent Rest Opacity" INVISIBLE="true" default="100" valid_min="0" valid_max="100" slider_min="0" slider_max="100" precision="0" DISPLAY_PERCENT="true" />
+    <Slider name="$$/AE/Preset/ParentRestAnchorX1=Parent Rest Anchor X" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestAnchorY1=Parent Rest Anchor Y" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+    <Slider name="$$/AE/Preset/ParentRestAnchorZ1=Parent Rest Anchor Z" INVISIBLE="true" default="0" valid_min="-30000" valid_max="30000" slider_min="-30000" slider_max="10" precision="2" />
+  </Effect>'''
+
+# Line-by-line processing (regex hangs on large files!)
+with open(preset_file, 'r') as f:
+    lines = f.readlines()
+
+output_lines = []
+skip_until_end_effect = False
+
+for line in lines:
+    if 'matchname="Pseudo/ParentRigChild"' in line:
+        skip_until_end_effect = True
+        continue
+    if skip_until_end_effect:
+        if '</Effect>' in line:
+            skip_until_end_effect = False
+        continue
+    output_lines.append(line)
+
+content = ''.join(output_lines)
+content = content.replace('</Effects>', new_effect + '\n</Effects>')
+
+with open(preset_file, 'w') as f:
+    f.write(content)
+
+print("Done! Parent Rig - Child pseudo effect added to PresetEffects.xml")
+```
+
+Run with: `sudo python3 /tmp/update_child_effect.py`
+
+### ⚠️ Empty Name Quirk
+
+When adding a pseudo effect via `addProperty("Pseudo/ParentRigChild")`, **the effect name may be empty** even though the effect works correctly. This is an AE quirk with localization strings (`$$/AE/Preset/...`).
+
+**Solution:** Don't validate by name. Instead:
+1. Check `numProperties >= 24` (the child effect has 24 sliders)
+2. Manually set the name: `eff.name = "Parent Rig - Child"`
+
+```javascript
+var eff = effects.addProperty("Pseudo/ParentRigChild");
+if (eff) {
+    // Don't check eff.name - it may be empty even when effect works!
+    if (eff.numProperties >= 24) {
+        eff.name = "Parent Rig - Child";  // Set name manually
+        // ... set property values ...
+    }
+}
+```
 
 ---
 
