@@ -8,57 +8,64 @@
 
 Both take up indices in the property list. This affects how you reference properties by index in expressions.
 
-### Parent Rig - Parent Effect Structure (VERIFIED Dec 2024)
+### Parent Rig - Parent Effect Structure (UPDATED Dec 2024 - with Pin System)
 
 **CRITICAL:** Nested group properties use FLAT indexing in expressions. You CANNOT access them via `pEff("Group Name")("Property")` - this causes "can't use this param type" error. You MUST use numeric indices.
 
 | Index | Type | Property Name |
 |-------|------|---------------|
 | 1 | label | "Delay:" |
-| 2 | endLabel | (auto-generated) |
+| 2 | endLabel | (auto) |
 | **3** | slider | **Delay - Step** |
 | **4** | slider | **Delay - Stretch** |
-| **5** | slider | **Falloff** |
-| **6** | slider | **Influence on children** |
-| 7 | label | "" (empty separator) |
-| 8 | endLabel | (auto-generated) |
-| 9 | label | "Order:" |
-| 10 | endLabel | (auto-generated) |
-| **11** | slider | **Reverse order** |
-| **12** | checkbox | **Random order** |
-| **13** | slider | **Random seed** |
+| **5** | slider | **Falloff** (Delay) |
+| 6 | label | "" (empty separator) |
+| 7 | endLabel | (auto) |
+| 8 | label | " Influence:" |
+| 9 | endLabel | (auto) |
+| **10** | slider | **Influence on children** |
+| **11** | popup | **Pin layer** (1=None, 2=First, 3=Last) |
+| **12** | slider | **Pin influence** (0-100%, default 100%) |
+| **13** | slider | **Pin trim** (0-100, default 0) |
 | 14 | label | "" (empty separator) |
-| 15 | endLabel | (auto-generated) |
-| 16 | label | "Leader layer:" |
-| 17 | endLabel | (auto-generated) |
-| **18** | slider | **Leader index** |
-| **19** | slider | **Delay before leader** |
-| **20** | slider | **Delay after leader** |
+| 15 | endLabel | (auto) |
+| 16 | label | "Order:" |
+| 17 | endLabel | (auto) |
+| **18** | slider | **Reverse order** |
+| **19** | checkbox | **Random order** |
+| **20** | slider | **Random seed** |
 | 21 | label | "" (empty separator) |
-| 22 | endLabel | (auto-generated) |
-| 23 | label | "Transform type:" |
-| 24 | endLabel | (auto-generated) |
-| **25** | popup | **Scale around** (1=Child, 2=Parent, 3=Leader) |
-| **26** | popup | **Rotate around** (1=Child, 2=Parent, 3=Leader) |
-| 27 | label | "" (empty separator) |
-| 28 | endLabel | (auto-generated) |
-| 29 | group header | "Children follow:" |
-| **30** | checkbox | **Position** (in Children follow) |
-| **31** | checkbox | **Scale** (in Children follow) |
-| **32** | checkbox | **Rotation** (in Children follow) |
-| **33** | checkbox | **Opacity** (in Children follow) |
-| **34** | checkbox | **Anchor point** (in Children follow) |
-| 35 | label | "" (empty separator inside group) |
-| 36 | endLabel | (auto-generated) |
-| 37 | endGroup | (auto-generated) |
-| 38 | group header | "Delays apply to:" |
-| **39** | checkbox | **Position** (in Delays apply to) |
-| **40** | checkbox | **Scale** (in Delays apply to) |
-| **41** | checkbox | **Rotation** (in Delays apply to) |
-| **42** | checkbox | **Opacity** (in Delays apply to) |
-| **43** | checkbox | **Anchor point** (in Delays apply to) |
-| 44 | endGroup | (auto-generated) |
-| **45** | slider | **Child count** (hidden)
+| 22 | endLabel | (auto) |
+| 23 | label | "Leader layer:" |
+| 24 | endLabel | (auto) |
+| **25** | slider | **Leader index** |
+| **26** | slider | **Delay before leader** |
+| **27** | slider | **Delay after leader** |
+| 28 | label | "" (empty separator) |
+| 29 | endLabel | (auto) |
+| 30 | label | " Transform type:" |
+| 31 | endLabel | (auto) |
+| **32** | popup | **Scale around** (1=Child, 2=Parent, 3=Leader) |
+| **33** | popup | **Rotate around** (1=Child, 2=Parent, 3=Leader) |
+| 34 | label | "" (empty separator) |
+| 35 | endLabel | (auto) |
+| 36 | group header | "Children follow:" |
+| **37** | checkbox | **Position** (in Children follow) |
+| **38** | checkbox | **Scale** (in Children follow) |
+| **39** | checkbox | **Rotation** (in Children follow) |
+| **40** | checkbox | **Opacity** (in Children follow) |
+| **41** | checkbox | **Anchor point** (in Children follow) |
+| 42 | label | "" (empty separator inside group) |
+| 43 | endLabel | (auto) |
+| 44 | endGroup | (auto) |
+| 45 | group header | "Delays apply to:" |
+| **46** | checkbox | **Position** (in Delays apply to) |
+| **47** | checkbox | **Scale** (in Delays apply to) |
+| **48** | checkbox | **Rotation** (in Delays apply to) |
+| **49** | checkbox | **Opacity** (in Delays apply to) |
+| **50** | checkbox | **Anchor point** (in Delays apply to) |
+| 51 | endGroup | (auto) |
+| **52** | slider | **Child count** (hidden)
 
 ### Expression Access Pattern (FLAT INDICES ONLY)
 
@@ -69,42 +76,47 @@ Always use flat numeric indices for ALL properties, including those inside group
 // In expressions, access pseudo effect properties:
 var pEff = parentLayer.effect("Parent Rig - Parent");
 
-// Delay section (indices 3-6)
-var delayProp = pEff(3);        // Delay - Step
-var stretchProp = pEff(4);      // Delay - Stretch
-var falloffProp = pEff(5);      // Falloff
-var parentInfluenceProp = pEff(6);  // Influence on children
+// Delay section (indices 3-5)
+var delayProp = pEff(3);              // Delay - Step
+var stretchProp = pEff(4);            // Delay - Stretch
+var delayFalloffProp = pEff(5);       // Falloff (Delay)
 
-// Order section (indices 11-13)
-var reverseOrderProp = pEff(11);    // Reverse order
-var randomEnabled = pEff(12).value; // Random order checkbox
-var randomSeed = pEff(13).value;    // Random seed
+// Influence section (indices 10-13)
+var parentInfluenceProp = pEff(10);   // Influence on children
+var pinModeProp = pEff(11);           // Pin layer (1=None, 2=First, 3=Last)
+var pinInfluenceProp = pEff(12);      // Pin influence (0-100%)
+var pinTrimProp = pEff(13);           // Pin trim (0-childCount)
 
-// Leader layer section (indices 18-20)
-var leaderIndexProp = pEff(18);          // Leader index
-var delayBeforeLeaderProp = pEff(19);    // Delay before leader
-var delayAfterLeaderProp = pEff(20);     // Delay after leader
+// Order section (indices 18-20)
+var reverseOrderProp = pEff(18);    // Reverse order
+var randomEnabled = pEff(19).value; // Random order checkbox
+var randomSeed = pEff(20).value;    // Random seed
 
-// Transform type popups (indices 25-26): 1=Child, 2=Parent, 3=Leader
-var scaleAroundMode = pEff(25).value;   // 1=Child, 2=Parent, 3=Leader
-var rotateAroundMode = pEff(26).value;  // 1=Child, 2=Parent, 3=Leader
+// Leader layer section (indices 25-27)
+var leaderIndexProp = pEff(25);          // Leader index
+var delayBeforeLeaderProp = pEff(26);    // Delay before leader
+var delayAfterLeaderProp = pEff(27);     // Delay after leader
 
-// Children follow (indices 30-34) - FLAT INDICES, NOT GROUP ACCESS
-var followPosition = pEff(30).value;
-var followScale = pEff(31).value;
-var followRotation = pEff(32).value;
-var followOpacity = pEff(33).value;
-var followAnchorPoint = pEff(34).value;
+// Transform type popups (indices 32-33): 1=Child, 2=Parent, 3=Leader
+var scaleAroundMode = pEff(32).value;   // 1=Child, 2=Parent, 3=Leader
+var rotateAroundMode = pEff(33).value;  // 1=Child, 2=Parent, 3=Leader
 
-// Delays apply to (indices 39-43) - FLAT INDICES, NOT GROUP ACCESS
-var delayPosition = pEff(39).value;
-var delayScale = pEff(40).value;
-var delayRotation = pEff(41).value;
-var delayOpacity = pEff(42).value;
-var delayAnchorPoint = pEff(43).value;
+// Children follow (indices 37-41) - FLAT INDICES, NOT GROUP ACCESS
+var followPosition = pEff(37).value;
+var followScale = pEff(38).value;
+var followRotation = pEff(39).value;
+var followOpacity = pEff(40).value;
+var followAnchorPoint = pEff(41).value;
 
-// Child count (index 45)
-var childCount = pEff(45).value;
+// Delays apply to (indices 46-50) - FLAT INDICES, NOT GROUP ACCESS
+var delayPosition = pEff(46).value;
+var delayScale = pEff(47).value;
+var delayRotation = pEff(48).value;
+var delayOpacity = pEff(49).value;
+var delayAnchorPoint = pEff(50).value;
+
+// Child count (index 52)
+var childCount = pEff(52).value;
 ```
 
 ### ExtendScript Access (Setting Values)
@@ -486,7 +498,121 @@ With 5 children and Leader index = 3:
 ### Notes
 - Leader index ignores the Randomization feature (uses original child indices)
 - All three Leader controls are animatable (can change throughout the timeline)
-- Falloff still applies to the calculated base index
+- Delay Falloff still applies to the calculated base index
+
+## Pin System (Overscroll Stretch)
+
+The Pin system provides intuitive control for overscroll stretch effects, where one end of a list stays pinned while the rest stretches.
+
+### Controls
+
+#### Pin layer (dropdown: None / First / Last, default: None)
+Which end of the child list to pin in place.
+
+- **None**: No pinning, all children follow parent equally
+- **First**: Pin child at index 1 (first in stack order)
+- **Last**: Pin child at highest index (last in stack order)
+
+#### Pin influence (0-100%, default: 100%)
+How firmly the pinned layer stays in place.
+
+- **100%**: Pinned layer stays completely in place (0% influence)
+- **50%**: Pinned layer moves halfway
+- **0%**: No pinning effect (same as Pin layer = None)
+
+#### Pin trim (0-childCount, default: 0)
+How many layers to exclude from the stretch effect, counted from the **non-pinned end**.
+
+- **0**: All layers participate in the stretch gradient
+- **N**: Remove N layers from the far end - they follow parent at 100% influence
+
+### How Stretch Distribution Works
+
+The Pin system creates a **linear gradient** of influence from the pinned layer to the trim point:
+
+- **Pinned layer**: Stays in place (0% influence when fully pinned)
+- **Layer next to pinned**: MOST stretch (low influence, biggest gap)
+- **Layers further from pinned**: Less stretch (increasing influence)
+- **Layer at trim point**: Minimal stretch (nearly full influence)
+- **Layers beyond trim**: Full influence (100%, follow parent normally)
+
+**Key insight:** Layers CLOSE to the pinned layer have the BIGGEST gaps (most stretch). Layers FAR from the pinned layer have smaller gaps (less stretch).
+
+### Example: 20 layers, Pin = Last, Trim = 5
+
+```
+Layer 20 (pinned): stays in place (0% influence)
+Layer 19: MOST stretch (low influence, big gap from 20)
+Layer 18: less stretch
+...
+Layer 6 (trim point): minimal stretch (high influence)
+Layers 5-1: follow normally (100% influence, beyond trim)
+```
+
+When parent moves up → Layer 20 stays put → Layer 19 lags most (big gap) → gaps decrease toward layer 6 → Layers 1-5 follow parent fully.
+
+### Example: Pin = First, Pin influence = 50%, Trim = 0
+
+```
+Layer 1 (pinned at 50%): moves halfway
+Layer 2: MOST stretch (big gap from layer 1)
+...
+Layer 20: minimal stretch (follows almost fully)
+```
+
+### Implementation Formula
+
+```javascript
+function getPinInfluenceMultiplier(t) {
+    var pinMode = pinModeProp.value;  // 1=None, 2=First, 3=Last
+    if (pinMode === 1) return 1;  // No pinning
+
+    var pinStrength = pinInfluenceProp.valueAtTime(t) / 100;
+    var trim = Math.round(pinTrimProp.valueAtTime(t));
+
+    var pinnedIdx = (pinMode === 2) ? 1 : childCount;
+    var trimEndIdx = (pinMode === 2) ? childCount - trim : 1 + trim;
+
+    // Beyond trim point = full influence
+    if (pinMode === 2 && myIndex > trimEndIdx) return 1;
+    if (pinMode === 3 && myIndex < trimEndIdx) return 1;
+
+    // Pinned layer = low influence (stays in place)
+    if (myIndex === pinnedIdx) return 1 - pinStrength;
+
+    // Square root curve: biggest gap at pinned, smaller gaps toward trim
+    var distFromPinned = Math.abs(myIndex - pinnedIdx);
+    var maxDist = Math.abs(trimEndIdx - pinnedIdx);
+    var normalizedDist = distFromPinned / Math.max(maxDist, 1);
+    var influence = Math.sqrt(normalizedDist);
+
+    return 1 - (1 - influence) * pinStrength;
+}
+```
+
+### Use Cases
+- **Overscroll stretch**: Pin the top/bottom of a list, rest stretches when scrolled past bounds
+- **Elastic scroll indicators**: Visual feedback for scroll limits
+- **Bouncy list animations**: Pin one end, animate parent position with overshoot
+- **Accordion effects**: Pin header, body stretches/compresses
+
+### Notes
+- All Pin controls are keyframeable
+- Pin system replaces the old Influence Falloff/Curve system
+- Trim is useful for long lists where you only want some layers to stretch
+- Uses square root curve for natural overscroll feel: biggest gap at pinned layer, progressively smaller gaps toward trim point
+
+## Delay Falloff
+
+Controls how delay changes for children further from the leader layer.
+
+### Delay Falloff (0-200%, default: 100%)
+
+- **100% (default)**: No change - all children use the same delay calculation
+- **>100%**: Children further from leader get MORE delay (exponential increase)
+- **<100%**: Children further from leader get LESS delay (exponential decrease)
+
+Uses a geometric series formula for smooth falloff curves.
 
 ## Child Pseudo Effect (TODO)
 
