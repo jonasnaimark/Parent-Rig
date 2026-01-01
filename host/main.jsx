@@ -1381,17 +1381,19 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    else if (mode === 9) { normalized = (normX + 1 - normY) / 2; }',  // TR to BL: TR → high → first
             '    else if (mode === 10) { normalized = (1 - normX + normY) / 2; }',  // BL to TR: BL → high → first
             '    else if (mode === 11) { normalized = (normX + normY) / 2; }',  // BR to TL: BR → high → first
-            '    else if (mode === 13) {',  // Radial outwards: center → high normalized → low index → first
+            '    else if (mode === 13) {',  // Radial outwards: center first
             '        var dx = pos[0] - groupCenterX;',
             '        var dy = pos[1] - groupCenterY;',
-            '        var maxDist = Math.max(rangeX, rangeY) / 2;',
-            '        normalized = 1 - Math.sqrt(dx*dx + dy*dy) / Math.max(maxDist, 1);',
+            '        var maxDist = Math.sqrt(rangeX*rangeX + rangeY*rangeY) / 2;',
+            '        var distNorm = Math.min(1, Math.sqrt(dx*dx + dy*dy) / Math.max(maxDist, 1));',
+            '        normalized = 1 - distNorm;',  // center (dist=0) → normalized=1 → low index → first
             '    }',
-            '    else if (mode === 14) {',  // Radial inwards: edges → high normalized → low index → first
+            '    else if (mode === 14) {',  // Radial inwards: edges first
             '        var dx = pos[0] - groupCenterX;',
             '        var dy = pos[1] - groupCenterY;',
-            '        var maxDist = Math.max(rangeX, rangeY) / 2;',
-            '        normalized = Math.sqrt(dx*dx + dy*dy) / Math.max(maxDist, 1);',
+            '        var maxDist = Math.sqrt(rangeX*rangeX + rangeY*rangeY) / 2;',
+            '        var distNorm = Math.min(1, Math.sqrt(dx*dx + dy*dy) / Math.max(maxDist, 1));',
+            '        normalized = distNorm;',  // edge (dist=max) → normalized=1 → low index → first
             '    }',
             '    else { normalized = 0; }',
             '    ',
