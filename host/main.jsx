@@ -736,11 +736,22 @@ function findParentChildRelationships(selectedLayers, comp) {
 // ============================================
 
 function hasEffect(layer, effectName) {
+    // Map display names to matchNames for pseudo effects (which may have empty display names)
+    var matchNameMap = {
+        "Parent Rig - Child": "Pseudo/ParentRigChild",
+        "Parent Rig - Parent": "Pseudo/ParentRigParent"
+    };
+    var targetMatchName = matchNameMap[effectName] || null;
+
     try {
         var effects = layer.property("ADBE Effect Parade");
         for (var i = 1; i <= effects.numProperties; i++) {
             var eff = effects.property(i);
             if (eff.name === effectName || eff.matchName === effectName) {
+                return true;
+            }
+            // Also check mapped matchName for pseudo effects
+            if (targetMatchName && eff.matchName === targetMatchName) {
                 return true;
             }
         }
@@ -1055,9 +1066,9 @@ function addParentEffect(layer, childCount) {
     try {
         var eff = effects.addProperty("Pseudo/ParentRigParent");
         if (eff) {
-            // Verify the effect actually loaded properly (has name and expected properties)
-            // After undo/redo, AE sometimes returns a broken effect with no name
-            if (eff.name && eff.name !== "" && eff.numProperties >= 60) {
+            // Verify the effect actually loaded properly (has expected properties)
+            if (eff.numProperties >= 60) {
+                eff.name = "Parent Rig - Parent";  // Ensure consistent name for expression access
                 pseudoEffectApplied = true;
                 // Set the child count value (index 71)
                 try {
@@ -1097,6 +1108,7 @@ function addParentEffect(layer, childCount) {
                 for (var i = 1; i <= effects.numProperties; i++) {
                     var eff = effects.property(i);
                     if (eff.matchName === "Pseudo/ParentRigParent" || eff.name === "Parent Rig - Parent") {
+                        eff.name = "Parent Rig - Parent";  // Ensure consistent name for expression access
                         try {
                             eff.property(71).setValue(childCount);  // Child count
                         } catch (e2) {
@@ -1413,15 +1425,288 @@ function addChildEffect(layer, index, parentLayerIndex,
 }
 
 // ============================================
+// AFFECTOR
+// ============================================
+
+function addAffector() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return "error";
+    }
+
+    // Check if affector already exists
+    for (var i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).name === "Parent Rig Affector") {
+            alert("An affector already exists in this composition.");
+            return "exists";
+        }
+    }
+
+    app.beginUndoGroup("Add Parent Rig Affector");
+
+    try {
+        // Create shape layer
+        var affector = comp.layers.addShape();
+        affector.name = "Parent Rig Affector";
+        affector.guideLayer = true;
+
+        var contents = affector.property("ADBE Root Vectors Group");
+
+        // Outer ellipse group
+        var outerGroup = contents.addProperty("ADBE Vector Group");
+        outerGroup.name = "Outer";
+        var outerVectors = outerGroup.property("ADBE Vectors Group");
+        var outerEllipse = outerVectors.addProperty("ADBE Vector Shape - Ellipse");
+        var outerSize = outerEllipse.property("ADBE Vector Ellipse Size");
+        outerSize.setValue([400, 400]);
+        var outerStroke = outerVectors.addProperty("ADBE Vector Graphic - Stroke");
+        outerStroke.property("ADBE Vector Stroke Color").setValue([1, 0.5, 0, 1]); // Orange
+        outerStroke.property("ADBE Vector Stroke Width").setValue(3);
+
+        // Inner ellipse group
+        var innerGroup = contents.addProperty("ADBE Vector Group");
+        innerGroup.name = "Inner";
+        var innerVectors = innerGroup.property("ADBE Vectors Group");
+        var innerEllipse = innerVectors.addProperty("ADBE Vector Shape - Ellipse");
+        var innerSize = innerEllipse.property("ADBE Vector Ellipse Size");
+        innerSize.setValue([100, 100]);
+        var innerStroke = innerVectors.addProperty("ADBE Vector Graphic - Stroke");
+        innerStroke.property("ADBE Vector Stroke Color").setValue([1, 0.7, 0.3, 1]); // Lighter orange
+        innerStroke.property("ADBE Vector Stroke Width").setValue(2);
+
+        // Position at center of comp
+        affector.transform.position.setValue([comp.width / 2, comp.height / 2]);
+
+        // Add effects
+        var effects = affector.property("ADBE Effect Parade");
+
+        // Radius controls (at top for easy access)
+        var outerRadius = effects.addProperty("ADBE Slider Control");
+        outerRadius.name = "Outer Radius";
+        outerRadius.property("Slider").setValue(200);
+
+        var innerRadius = effects.addProperty("ADBE Slider Control");
+        innerRadius.name = "Inner Radius";
+        innerRadius.property("Slider").setValue(50);
+
+        // Scale (100 = no change, 150 = 150% scale)
+        var scaleCtrl = effects.addProperty("ADBE Slider Control");
+        scaleCtrl.name = "Scale";
+        scaleCtrl.property("Slider").setValue(100);
+
+        // Opacity (100 = no change, 50 = 50% opacity)
+        var opacityCtrl = effects.addProperty("ADBE Slider Control");
+        opacityCtrl.name = "Opacity";
+        opacityCtrl.property("Slider").setValue(100);
+
+        // Rotation (degrees added to rotation)
+        var rotCtrl = effects.addProperty("ADBE Slider Control");
+        rotCtrl.name = "Rotation";
+        rotCtrl.property("Slider").setValue(0);
+
+        // Position offsets
+        var posX = effects.addProperty("ADBE Slider Control");
+        posX.name = "Position X";
+        posX.property("Slider").setValue(0);
+
+        var posY = effects.addProperty("ADBE Slider Control");
+        posY.name = "Position Y";
+        posY.property("Slider").setValue(0);
+
+        var posZ = effects.addProperty("ADBE Slider Control");
+        posZ.name = "Position Z";
+        posZ.property("Slider").setValue(0);
+
+        // Item Width (for calculating gaps when items scale)
+        var itemWidth = effects.addProperty("ADBE Slider Control");
+        itemWidth.name = "Item Width";
+        itemWidth.property("Slider").setValue(400);
+
+        // Item Gap (space between items at rest)
+        var itemGap = effects.addProperty("ADBE Slider Control");
+        itemGap.name = "Item Gap";
+        itemGap.property("Slider").setValue(20);
+
+        // Falloff with keyframes (100 at frame 0, 0 at frame 60)
+        var falloff = effects.addProperty("ADBE Slider Control");
+        falloff.name = "Falloff";
+        var falloffSlider = falloff.property("Slider");
+        falloffSlider.setValueAtTime(0, 100);
+        falloffSlider.setValueAtTime(60 * comp.frameDuration, 0);
+
+        // Inertia (0 = instant/spatial, 100 = max resistance to fast movement)
+        var inertiaCtrl = effects.addProperty("ADBE Slider Control");
+        inertiaCtrl.name = "Inertia";
+        inertiaCtrl.property("Slider").setValue(0);
+
+        // Find parent layer to position affector just above it in timeline
+        // (lower index = higher in timeline, so we want affector index = parentIndex - 1)
+        var parentLayer = null;
+        for (var i = 1; i <= comp.numLayers; i++) {
+            var layer = comp.layer(i);
+            if (layer.name === affector.name) continue; // Skip the affector itself
+            if (layer.name === "Carousel Parent" || layer.name === "List Parent" || layer.name === "Grid Parent" ||
+                hasEffect(layer, "Parent Rig - Parent") || hasEffect(layer, "PR_Delay")) {
+                parentLayer = layer;
+                break;
+            }
+        }
+
+        if (parentLayer) {
+            // Move affector just above (before) the parent layer in timeline
+            affector.moveBefore(parentLayer);
+        } else {
+            // No parent found, move to top
+            affector.moveToBeginning();
+        }
+
+        // Link ellipse sizes to sliders via expressions (access fresh references)
+        var outerSizeExpr = affector.property("ADBE Root Vectors Group").property("Outer").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
+        var innerSizeExpr = affector.property("ADBE Root Vectors Group").property("Inner").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
+        outerSizeExpr.expression = 'var r = effect("Outer Radius")("Slider"); [r*2, r*2];';
+        innerSizeExpr.expression = 'var r = effect("Inner Radius")("Slider"); [r*2, r*2];';
+
+        // Set outer radius to half of the smaller comp dimension (access fresh reference)
+        var affectorSize = Math.min(comp.width, comp.height) / 2;
+        affector.effect("Outer Radius")("Slider").setValue(affectorSize);
+
+        // Update existing rigged children to include affector code
+        updateExistingRigsWithAffector(comp);
+
+    } catch (e) {
+        alert("Error creating affector: " + e.toString());
+        app.endUndoGroup();
+        return "error";
+    }
+
+    app.endUndoGroup();
+    return "success";
+}
+
+// Re-apply expressions to existing rigged children so they include affector code
+function updateExistingRigsWithAffector(comp) {
+    // Find parent layer (has Parent Rig - Parent effect)
+    var parent = null;
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var layer = comp.layer(i);
+        if (hasEffect(layer, "Parent Rig - Parent") || hasEffect(layer, "PR_Delay")) {
+            parent = layer;
+            break;
+        }
+    }
+
+    if (!parent) return; // No rig found
+
+    // Ensure parent effect has correct name for expression access
+    try {
+        var parentEffects = parent.property("ADBE Effect Parade");
+        for (var pe = 1; pe <= parentEffects.numProperties; pe++) {
+            var eff = parentEffects.property(pe);
+            if (eff.matchName === "Pseudo/ParentRigParent") {
+                eff.name = "Parent Rig - Parent";
+                break;
+            }
+        }
+    } catch (e) {}
+
+    // Find all children (have Parent Rig - Child effect) and ensure effect names are correct
+    var children = [];
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var layer = comp.layer(i);
+        if (layer.index !== parent.index && hasEffect(layer, "Parent Rig - Child")) {
+            // Ensure child effect has correct name for expression access
+            try {
+                var layerEffects = layer.property("ADBE Effect Parade");
+                for (var ce = 1; ce <= layerEffects.numProperties; ce++) {
+                    var eff = layerEffects.property(ce);
+                    if (eff.matchName === "Pseudo/ParentRigChild") {
+                        eff.name = "Parent Rig - Child";
+                        break;
+                    }
+                }
+            } catch (e) {}
+            children.push(layer);
+        }
+    }
+
+    if (children.length === 0) return;
+
+    // Calculate group bounds from children's rest positions
+    var groupBounds = {
+        minX: Infinity, maxX: -Infinity,
+        minY: Infinity, maxY: -Infinity,
+        centerX: 0, centerY: 0
+    };
+
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        var restX = 0, restY = 0;
+
+        // Get rest position from child effect
+        try {
+            var childEff = child.effect("Parent Rig - Child");
+            if (childEff) {
+                restX = childEff.property(3).value; // Rest Pos X
+                restY = childEff.property(4).value; // Rest Pos Y
+            }
+        } catch (e) {}
+
+        if (restX < groupBounds.minX) groupBounds.minX = restX;
+        if (restX > groupBounds.maxX) groupBounds.maxX = restX;
+        if (restY < groupBounds.minY) groupBounds.minY = restY;
+        if (restY > groupBounds.maxY) groupBounds.maxY = restY;
+    }
+
+    groupBounds.centerX = (groupBounds.minX + groupBounds.maxX) / 2;
+    groupBounds.centerY = (groupBounds.minY + groupBounds.maxY) / 2;
+
+    // Re-apply expressions to each child, using stored rest positions
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        var is3D = child.threeDLayer;
+        var splitDims = false;
+
+        // Check for split dimensions
+        try {
+            var xPos = child.property("ADBE Transform Group").property("ADBE Position_0");
+            splitDims = (xPos !== null && xPos.canSetExpression);
+        } catch (e) {}
+
+        // Get child rest position from stored effect values (NOT current position)
+        var childRestPos;
+        try {
+            var childEff = child.effect("Parent Rig - Child");
+            if (childEff) {
+                childRestPos = [
+                    childEff.property(3).value,  // Rest Pos X
+                    childEff.property(4).value   // Rest Pos Y
+                ];
+                if (is3D) childRestPos.push(childEff.property(5).value);  // Rest Pos Z
+            }
+        } catch (e) {
+            childRestPos = [0, 0];
+        }
+
+        // Re-apply expressions with stored rest position
+        applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, childRestPos);
+    }
+}
+
+
+// ============================================
 // EXPRESSION GENERATION
 // ============================================
 
-function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
+function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, existingRestPos) {
     var parentName = parent.name.replace(/"/g, '\\"');
 
-    // Get child's current position (which is the rest position at rig time)
+    // Get child's rest position - use provided value if available (for re-rigging),
+    // otherwise read current position (for initial rigging)
     var childRestPos;
-    if (splitDims) {
+    if (existingRestPos) {
+        childRestPos = existingRestPos;
+    } else if (splitDims) {
         childRestPos = [
             child.transform.xPosition.value,
             child.transform.yPosition.value
@@ -1817,6 +2102,194 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    if (!applyDelayToThisTransform) return 0;',
             '    return stretchProp.valueAtTime(t) * getEffectiveIndexAtTime(t) * thisComp.frameDuration;',
             '}',
+            '',
+            '// ===== AFFECTOR SYSTEM =====',
+            'var affector = null;',
+            'try { affector = thisComp.layer("Parent Rig Affector"); } catch(e) {}',
+            '',
+            'function getAffectorOuterRadius() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Outer Radius")("Slider").value; } catch(e) { return 200; }',
+            '}',
+            '',
+            'function getAffectorInnerRadius() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Inner Radius")("Slider").value; } catch(e) { return 50; }',
+            '}',
+            '',
+            'function getAffectorInertia() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Inertia")("Slider").value; } catch(e) { return 0; }',
+            '}',
+            '',
+            'function getAffectorInfluence(pos) {',
+            '    if (!affector) return 0;',
+            '    var affectorPos = affector.transform.position.value;',
+            '    var outerR = getAffectorOuterRadius();',
+            '    var innerR = getAffectorInnerRadius();',
+            '    if (outerR <= 0) return 0;',
+            '    var dx = pos[0] - affectorPos[0];',
+            '    var dy = pos[1] - affectorPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist <= innerR) return 1;',
+            '    if (dist >= outerR) return 0;',
+            '    var falloffRange = outerR - innerR;',
+            '    var normalizedDist = (dist - innerR) / falloffRange;',
+            '    try {',
+            '        var falloffProp = affector.effect("Falloff")("Slider");',
+            '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+            '        return falloffVal / 100;',
+            '    } catch(e) { return 1 - normalizedDist; }',
+            '}',
+            '',
+            '// Effective influence with inertia (velocity-based temporal smoothing)',
+            'function getEffectiveInfluence(currentPos) {',
+            '    var spatialInfluence = getAffectorInfluence(currentPos);',
+            '    var inertia = getAffectorInertia();',
+            '    if (inertia <= 0) return spatialInfluence;',
+            '    var inertiaNorm = inertia / 100;',
+            '    var historyTime = inertiaNorm * 0.5;',
+            '    var numSteps = 8;',
+            '    var stepDt = historyTime / numSteps;',
+            '    var frameDt = thisComp.frameDuration;',
+            '    // Compute smoothed velocity first (max over 5 frames)',
+            '    var p1 = thisLayer.transform.position.valueAtTime(Math.max(0, time - frameDt));',
+            '    var p2 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 2*frameDt));',
+            '    var p3 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 3*frameDt));',
+            '    var p4 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 4*frameDt));',
+            '    var p5 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 5*frameDt));',
+            '    var v1 = length(sub(currentPos, p1)) / frameDt;',
+            '    var v2 = length(sub(p1, p2)) / frameDt;',
+            '    var v3 = length(sub(p2, p3)) / frameDt;',
+            '    var v4 = length(sub(p3, p4)) / frameDt;',
+            '    var v5 = length(sub(p4, p5)) / frameDt;',
+            '    var smoothVel = Math.max(v1, v2, v3, v4, v5);',
+            '    // Perf: if velocity is negligible, return spatial influence directly',
+            '    if (smoothVel < 0.5) return spatialInfluence;',
+            '    var effInf = 0;',
+            '    for (var i = numSteps; i >= 0; i--) {',
+            '        var t = time - i * stepDt;',
+            '        if (t < 0) t = 0;',
+            '        var pos = (i === 0) ? currentPos : thisLayer.transform.position.valueAtTime(t);',
+            '        var spatialInf = getAffectorInfluence(pos);',
+            '        var vel = 0;',
+            '        if (stepDt > 0.001) {',
+            '            var prevPos = thisLayer.transform.position.valueAtTime(Math.max(0, t - frameDt));',
+            '            vel = length(sub(pos, prevPos)) / frameDt;',
+            '        }',
+            '        var baseTau = 0.03 + inertiaNorm * 0.15;',
+            '        var velFactor = 1 + (vel / 400) * inertiaNorm;',
+            '        var tau = baseTau * velFactor;',
+            '        var alpha = Math.min(1, stepDt / Math.max(tau, 0.001));',
+            '        effInf = effInf + (spatialInf - effInf) * alpha;',
+            '    }',
+            '    // Sqrt compresses velocity range for buttery-smooth settling',
+            '    var settleBlend = Math.exp(-Math.sqrt(smoothVel) / 7);',
+            '    return effInf + (spatialInfluence - effInf) * settleBlend;',
+            '}',
+            '',
+            'function getAffectorItemWidth() {',
+            '    if (!affector) return 100;',
+            '    try { return affector.effect("Item Width")("Slider").value; } catch(e) { return 100; }',
+            '}',
+            '',
+            'function getAffectorItemGap() {',
+            '    if (!affector) return 20;',
+            '    try { return affector.effect("Item Gap")("Slider").value; } catch(e) { return 20; }',
+            '}',
+            '',
+            '// Scale multiplier for spread calculation (uses raw spatial influence, no inertia)',
+            'function getScaleMultAtPos(pos) {',
+            '    var influence = getAffectorInfluence(pos);',
+            '    if (influence <= 0) return 1;',
+            '    var scalePercent = 100;',
+            '    try { scalePercent = affector.effect("Scale")("Slider").value; } catch(e) {}',
+            '    return 1 + (scalePercent / 100 - 1) * influence;',
+            '}',
+            '',
+            'function integrateExtraWidth(distance, affectorPos, itemWidth, itemSpacing, isXAxis) {',
+            '    // Integrate extra width density from center to distance (smooth, no discrete jumps)',
+            '    if (Math.abs(distance) < 0.001) return 0;',
+            '    var sign = distance >= 0 ? 1 : -1;',
+            '    var absD = Math.abs(distance);',
+            '    ',
+            '    // Sample scale at several points and integrate (trapezoidal rule)',
+            '    var numSamples = 8;',
+            '    var stepSize = absD / numSamples;',
+            '    var integral = 0;',
+            '    ',
+            '    for (var i = 0; i <= numSamples; i++) {',
+            '        var p = i * stepSize;',
+            '        var pos = isXAxis ?',
+            '            [affectorPos[0] + sign * p, affectorPos[1]] :',
+            '            [affectorPos[0], affectorPos[1] + sign * p];',
+            '        var scaleMult = getScaleMultAtPos(pos);',
+            '        var extraWidthDensity = (scaleMult - 1) * itemWidth / itemSpacing;',
+            '        // Trapezoidal: half weight at endpoints',
+            '        var weight = (i === 0 || i === numSamples) ? 0.5 : 1;',
+            '        integral += extraWidthDensity * weight * stepSize;',
+            '    }',
+            '    ',
+            '    return sign * integral;',
+            '}',
+            '',
+            'function getAffectorSpread(currentPos, restPos, itemSpacing) {',
+            '    // Calculate spread offset using continuous integration (smooth gradient)',
+            '    if (!affector) return [0, 0];',
+            '    var affectorPos = affector.transform.position.value;',
+            '    var itemWidth = getAffectorItemWidth();',
+            '    if (itemWidth <= 0 || itemSpacing <= 0) return [0, 0];',
+            '    ',
+            '    var dx = currentPos[0] - affectorPos[0];',
+            '    var dy = currentPos[1] - affectorPos[1];',
+            '    ',
+            '    var offsetX = integrateExtraWidth(dx, affectorPos, itemWidth, itemSpacing, true);',
+            '    var offsetY = integrateExtraWidth(dy, affectorPos, itemWidth, itemSpacing, false);',
+            '    ',
+            '    return [offsetX, offsetY];',
+            '}',
+            '',
+            'function getAffectorPositionOffset(pos) {',
+            '    if (!affector) return [0, 0, 0];',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return [0, 0, 0];',
+            '    var px = 0, py = 0, pz = 0;',
+            '    try { px = affector.effect("Position X")("Slider").value; } catch(e) {}',
+            '    try { py = affector.effect("Position Y")("Slider").value; } catch(e) {}',
+            '    try { pz = affector.effect("Position Z")("Slider").value; } catch(e) {}',
+            '    if (px === 0 && py === 0 && pz === 0) return [0, 0, 0];',
+            '    // Position offset is uniform (same direction for all items)',
+            '    return [px * influence, py * influence, pz * influence];',
+            '}',
+            '',
+            'function getAffectorScaleMult(pos) {',
+            '    if (!affector) return 100;',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return 100;',
+            '    var amount = 100;',
+            '    try { amount = affector.effect("Scale")("Slider").value; } catch(e) {}',
+            '    // Interpolate from 100 (no change) toward amount based on influence',
+            '    return 100 + (amount - 100) * influence;',
+            '}',
+            '',
+            'function getAffectorRotationBoost(pos) {',
+            '    if (!affector) return 0;',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var amount = 0;',
+            '    try { amount = affector.effect("Rotation")("Slider").value; } catch(e) {}',
+            '    return amount * influence;',
+            '}',
+            '',
+            'function getAffectorOpacityMult(pos) {',
+            '    if (!affector) return 100;',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return 100;',
+            '    var amount = 100;',
+            '    try { amount = affector.effect("Opacity")("Slider").value; } catch(e) {}',
+            '    // Interpolate from 100 (no change) toward amount based on influence',
+            '    return 100 + (amount - 100) * influence;',
+            '}',
             ''
         ].join('\n');
     } else {
@@ -1956,6 +2429,194 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             'function getStretchAtTime(t) {',
             '    if (!applyDelayToThisTransform) return 0;',
             '    return stretchProp.valueAtTime(t) * getEffectiveIndexAtTime(t) * thisComp.frameDuration;',
+            '}',
+            '',
+            '// ===== AFFECTOR SYSTEM =====',
+            'var affector = null;',
+            'try { affector = thisComp.layer("Parent Rig Affector"); } catch(e) {}',
+            '',
+            'function getAffectorOuterRadius() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Outer Radius")("Slider").value; } catch(e) { return 200; }',
+            '}',
+            '',
+            'function getAffectorInnerRadius() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Inner Radius")("Slider").value; } catch(e) { return 50; }',
+            '}',
+            '',
+            'function getAffectorInertia() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Inertia")("Slider").value; } catch(e) { return 0; }',
+            '}',
+            '',
+            'function getAffectorInfluence(pos) {',
+            '    if (!affector) return 0;',
+            '    var affectorPos = affector.transform.position.value;',
+            '    var outerR = getAffectorOuterRadius();',
+            '    var innerR = getAffectorInnerRadius();',
+            '    if (outerR <= 0) return 0;',
+            '    var dx = pos[0] - affectorPos[0];',
+            '    var dy = pos[1] - affectorPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist <= innerR) return 1;',
+            '    if (dist >= outerR) return 0;',
+            '    var falloffRange = outerR - innerR;',
+            '    var normalizedDist = (dist - innerR) / falloffRange;',
+            '    try {',
+            '        var falloffProp = affector.effect("Falloff")("Slider");',
+            '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+            '        return falloffVal / 100;',
+            '    } catch(e) { return 1 - normalizedDist; }',
+            '}',
+            '',
+            '// Effective influence with inertia (velocity-based temporal smoothing)',
+            'function getEffectiveInfluence(currentPos) {',
+            '    var spatialInfluence = getAffectorInfluence(currentPos);',
+            '    var inertia = getAffectorInertia();',
+            '    if (inertia <= 0) return spatialInfluence;',
+            '    var inertiaNorm = inertia / 100;',
+            '    var historyTime = inertiaNorm * 0.5;',
+            '    var numSteps = 8;',
+            '    var stepDt = historyTime / numSteps;',
+            '    var frameDt = thisComp.frameDuration;',
+            '    // Compute smoothed velocity first (max over 5 frames)',
+            '    var p1 = thisLayer.transform.position.valueAtTime(Math.max(0, time - frameDt));',
+            '    var p2 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 2*frameDt));',
+            '    var p3 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 3*frameDt));',
+            '    var p4 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 4*frameDt));',
+            '    var p5 = thisLayer.transform.position.valueAtTime(Math.max(0, time - 5*frameDt));',
+            '    var v1 = length(sub(currentPos, p1)) / frameDt;',
+            '    var v2 = length(sub(p1, p2)) / frameDt;',
+            '    var v3 = length(sub(p2, p3)) / frameDt;',
+            '    var v4 = length(sub(p3, p4)) / frameDt;',
+            '    var v5 = length(sub(p4, p5)) / frameDt;',
+            '    var smoothVel = Math.max(v1, v2, v3, v4, v5);',
+            '    // Perf: if velocity is negligible, return spatial influence directly',
+            '    if (smoothVel < 0.5) return spatialInfluence;',
+            '    var effInf = 0;',
+            '    for (var i = numSteps; i >= 0; i--) {',
+            '        var t = time - i * stepDt;',
+            '        if (t < 0) t = 0;',
+            '        var pos = (i === 0) ? currentPos : thisLayer.transform.position.valueAtTime(t);',
+            '        var spatialInf = getAffectorInfluence(pos);',
+            '        var vel = 0;',
+            '        if (stepDt > 0.001) {',
+            '            var prevPos = thisLayer.transform.position.valueAtTime(Math.max(0, t - frameDt));',
+            '            vel = length(sub(pos, prevPos)) / frameDt;',
+            '        }',
+            '        var baseTau = 0.03 + inertiaNorm * 0.15;',
+            '        var velFactor = 1 + (vel / 400) * inertiaNorm;',
+            '        var tau = baseTau * velFactor;',
+            '        var alpha = Math.min(1, stepDt / Math.max(tau, 0.001));',
+            '        effInf = effInf + (spatialInf - effInf) * alpha;',
+            '    }',
+            '    // Sqrt compresses velocity range for buttery-smooth settling',
+            '    var settleBlend = Math.exp(-Math.sqrt(smoothVel) / 7);',
+            '    return effInf + (spatialInfluence - effInf) * settleBlend;',
+            '}',
+            '',
+            'function getAffectorItemWidth() {',
+            '    if (!affector) return 100;',
+            '    try { return affector.effect("Item Width")("Slider").value; } catch(e) { return 100; }',
+            '}',
+            '',
+            'function getAffectorItemGap() {',
+            '    if (!affector) return 20;',
+            '    try { return affector.effect("Item Gap")("Slider").value; } catch(e) { return 20; }',
+            '}',
+            '',
+            '// Scale multiplier for spread calculation (uses raw spatial influence, no inertia)',
+            'function getScaleMultAtPos(pos) {',
+            '    var influence = getAffectorInfluence(pos);',
+            '    if (influence <= 0) return 1;',
+            '    var scalePercent = 100;',
+            '    try { scalePercent = affector.effect("Scale")("Slider").value; } catch(e) {}',
+            '    return 1 + (scalePercent / 100 - 1) * influence;',
+            '}',
+            '',
+            'function integrateExtraWidth(distance, affectorPos, itemWidth, itemSpacing, isXAxis) {',
+            '    // Integrate extra width density from center to distance (smooth, no discrete jumps)',
+            '    if (Math.abs(distance) < 0.001) return 0;',
+            '    var sign = distance >= 0 ? 1 : -1;',
+            '    var absD = Math.abs(distance);',
+            '    ',
+            '    // Sample scale at several points and integrate (trapezoidal rule)',
+            '    var numSamples = 8;',
+            '    var stepSize = absD / numSamples;',
+            '    var integral = 0;',
+            '    ',
+            '    for (var i = 0; i <= numSamples; i++) {',
+            '        var p = i * stepSize;',
+            '        var pos = isXAxis ?',
+            '            [affectorPos[0] + sign * p, affectorPos[1]] :',
+            '            [affectorPos[0], affectorPos[1] + sign * p];',
+            '        var scaleMult = getScaleMultAtPos(pos);',
+            '        var extraWidthDensity = (scaleMult - 1) * itemWidth / itemSpacing;',
+            '        // Trapezoidal: half weight at endpoints',
+            '        var weight = (i === 0 || i === numSamples) ? 0.5 : 1;',
+            '        integral += extraWidthDensity * weight * stepSize;',
+            '    }',
+            '    ',
+            '    return sign * integral;',
+            '}',
+            '',
+            'function getAffectorSpread(currentPos, restPos, itemSpacing) {',
+            '    // Calculate spread offset using continuous integration (smooth gradient)',
+            '    if (!affector) return [0, 0];',
+            '    var affectorPos = affector.transform.position.value;',
+            '    var itemWidth = getAffectorItemWidth();',
+            '    if (itemWidth <= 0 || itemSpacing <= 0) return [0, 0];',
+            '    ',
+            '    var dx = currentPos[0] - affectorPos[0];',
+            '    var dy = currentPos[1] - affectorPos[1];',
+            '    ',
+            '    var offsetX = integrateExtraWidth(dx, affectorPos, itemWidth, itemSpacing, true);',
+            '    var offsetY = integrateExtraWidth(dy, affectorPos, itemWidth, itemSpacing, false);',
+            '    ',
+            '    return [offsetX, offsetY];',
+            '}',
+            '',
+            'function getAffectorPositionOffset(pos) {',
+            '    if (!affector) return [0, 0, 0];',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return [0, 0, 0];',
+            '    var px = 0, py = 0, pz = 0;',
+            '    try { px = affector.effect("Position X")("Slider").value; } catch(e) {}',
+            '    try { py = affector.effect("Position Y")("Slider").value; } catch(e) {}',
+            '    try { pz = affector.effect("Position Z")("Slider").value; } catch(e) {}',
+            '    if (px === 0 && py === 0 && pz === 0) return [0, 0, 0];',
+            '    // Position offset is uniform (same direction for all items)',
+            '    return [px * influence, py * influence, pz * influence];',
+            '}',
+            '',
+            'function getAffectorScaleMult(pos) {',
+            '    if (!affector) return 100;',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return 100;',
+            '    var amount = 100;',
+            '    try { amount = affector.effect("Scale")("Slider").value; } catch(e) {}',
+            '    // Interpolate from 100 (no change) toward amount based on influence',
+            '    return 100 + (amount - 100) * influence;',
+            '}',
+            '',
+            'function getAffectorRotationBoost(pos) {',
+            '    if (!affector) return 0;',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var amount = 0;',
+            '    try { amount = affector.effect("Rotation")("Slider").value; } catch(e) {}',
+            '    return amount * influence;',
+            '}',
+            '',
+            'function getAffectorOpacityMult(pos) {',
+            '    if (!affector) return 100;',
+            '    var influence = getEffectiveInfluence(pos);',
+            '    if (influence <= 0) return 100;',
+            '    var amount = 100;',
+            '    try { amount = affector.effect("Opacity")("Slider").value; } catch(e) {}',
+            '    // Interpolate from 100 (no change) toward amount based on influence',
+            '    return 100 + (amount - 100) * influence;',
             '}',
             ''
         ].join('\n');
@@ -2368,6 +3029,12 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         '    parentedPos = [parentedPos[0] + pinState.offsetX, parentedPos[1] + pinState.offsetY' + (is3D ? ', parentedPos[2]' : '') + '];',
         '}',
         '',
+        '// Apply Affector effects (spread and position offset)',
+        'var itemSpacing = getAffectorItemWidth() + getAffectorItemGap();',
+        'var affectorSpread = getAffectorSpread(parentedPos, restPos, itemSpacing);',
+        'var affectorPosOffset = getAffectorPositionOffset(parentedPos);',
+        'parentedPos = [parentedPos[0] + affectorSpread[0] + affectorPosOffset[0], parentedPos[1] + affectorSpread[1] + affectorPosOffset[1]' + (is3D ? ', parentedPos[2] + affectorPosOffset[2]' : '') + '];',
+        '',
         'var childAnimPos = value;',
         'var childDelta = sub(childAnimPos, restPos);',
         '',
@@ -2403,6 +3070,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         '// Apply ratio to child rest scale',
         'var parentDrivenScale = mulArrays(restScale, influencedRatio);',
         '',
+        '// Apply Affector scale multiplier (based on current position)',
+        'var currentPos = thisLayer.transform.position.value;',
+        'var scaleMult = getAffectorScaleMult(currentPos) / 100;',
+        'parentDrivenScale = [parentDrivenScale[0] * scaleMult, parentDrivenScale[1] * scaleMult' + (is3D ? ', parentDrivenScale[2] * scaleMult' : '') + '];',
+        '',
         '// Handle child animation: calculate child\'s own scale ratio relative to rest',
         'var childAnimScale = value;',
         'var childScaleRatio = divArrays(childAnimScale, restScale);',
@@ -2432,6 +3104,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         '}',
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
+        '',
+        '// Apply Affector rotation boost (based on current position)',
+        'var currentPos = thisLayer.transform.position.value;',
+        'var rotBoost = getAffectorRotationBoost(currentPos);',
+        'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         'var childAnimRot = value;',
         'var childRotDelta = childAnimRot - restRot;',
@@ -2522,6 +3199,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
         'var accRatioOffset = accOpacityDelta / parentRestOpacity;',
         'var effectiveRatio = 1 + accRatioOffset;',
         'var parentDrivenOpacity = restOpacity * effectiveRatio;',
+        '',
+        '// Apply Affector opacity multiplier (based on current position)',
+        'var currentPos = thisLayer.transform.position.value;',
+        'var opacityMult = getAffectorOpacityMult(currentPos) / 100;',
+        'parentDrivenOpacity = parentDrivenOpacity * opacityMult;',
         '',
         'var childAnimOpacity = value;',
         'var childOpacityRatio = childAnimOpacity / restOpacity;',
@@ -2739,11 +3421,20 @@ function addHorizontalCarousel() {
     var shapeHeight = 400;
     var gap = 20;
     var cornerRadius = 64;
-    var numShapes = 20;
+    var numShapes = 19;
     var compCenter = [comp.width / 2, comp.height / 2];
 
-    // Create shapes - first shape at center, rest move right
-    // Bottom of timeline = index 1 (centered shape), top = highest index
+    // Calculate total width to center the carousel
+    var totalWidth = (numShapes * shapeWidth) + ((numShapes - 1) * gap);
+    var startX = compCenter[0] - (totalWidth / 2) + (shapeWidth / 2);
+
+    // Create parent null first (will be at bottom of layer stack)
+    var parentNull = comp.layers.addShape();
+    parentNull.name = "Carousel Parent";
+    parentNull.transform.position.setValue([comp.width / 2, comp.height / 2]);
+    parentNull.label = 9; // Green
+
+    // Create shapes in world coordinates, then parent (AE adjusts position automatically)
     for (var i = 0; i < numShapes; i++) {
         var layer = comp.layers.addShape();
         layer.name = "Card " + (i + 1);
@@ -2760,11 +3451,12 @@ function addHorizontalCarousel() {
         var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
         fill.property("ADBE Vector Fill Color").setValue([0, 0, 0, 1]); // Black
 
-        // Position: first at center, rest move right
-        var xPos = compCenter[0] + (i * (shapeWidth + gap));
+        // Set world position first
+        var xPos = startX + (i * (shapeWidth + gap));
         layer.transform.position.setValue([xPos, compCenter[1]]);
 
-        // New layers go to top of stack, so first created (centered) ends up at bottom
+        // Parent to null (AE will convert position to be relative to parent)
+        layer.parent = parentNull;
     }
 
     app.endUndoGroup();
@@ -2783,11 +3475,20 @@ function addVerticalList() {
     var shapeHeight = 220;
     var gap = 20;
     var cornerRadius = 32;
-    var numShapes = 20;
+    var numShapes = 19;
     var compCenter = [comp.width / 2, comp.height / 2];
 
-    // Create shapes - first shape at center, rest move down
-    // Bottom of timeline = index 1 (centered shape), top = highest index
+    // Calculate total height to center the list
+    var totalHeight = (numShapes * shapeHeight) + ((numShapes - 1) * gap);
+    var startY = compCenter[1] - (totalHeight / 2) + (shapeHeight / 2);
+
+    // Create parent null first (will be at bottom of layer stack)
+    var parentNull = comp.layers.addShape();
+    parentNull.name = "List Parent";
+    parentNull.transform.position.setValue([comp.width / 2, comp.height / 2]);
+    parentNull.label = 9; // Green
+
+    // Create shapes - centered on artboard
     for (var i = 0; i < numShapes; i++) {
         var layer = comp.layers.addShape();
         layer.name = "Row " + (i + 1);
@@ -2804,11 +3505,12 @@ function addVerticalList() {
         var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
         fill.property("ADBE Vector Fill Color").setValue([0, 0, 0, 1]); // Black
 
-        // Position: first at center, rest move down
-        var yPos = compCenter[1] + (i * (shapeHeight + gap));
+        // Set world position first
+        var yPos = startY + (i * (shapeHeight + gap));
         layer.transform.position.setValue([compCenter[0], yPos]);
 
-        // New layers go to top of stack, so first created (centered) ends up at bottom
+        // Parent to null (AE will convert position to be relative to parent)
+        layer.parent = parentNull;
     }
 
     app.endUndoGroup();
@@ -2824,7 +3526,7 @@ function addGrid() {
     app.beginUndoGroup("Add 5x5 Grid");
 
     var gridSize = 5;
-    var squareSize = 150;
+    var squareSize = 180;
     var gap = 30;
     var cornerRadius = 20;
     var fillColor = [0.1, 0.1, 0.1, 1]; // Dark gray

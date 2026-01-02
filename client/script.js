@@ -6,6 +6,7 @@ var extensionPath = csInterface.getSystemPath(SystemPath.EXTENSION);
 
 document.addEventListener('DOMContentLoaded', function() {
     var applyButton = document.getElementById('applyRig');
+    var affectorButton = document.getElementById('addAffector');
     var horizontalButton = document.getElementById('addHorizontal');
     var verticalButton = document.getElementById('addVertical');
     var gridButton = document.getElementById('addGrid');
@@ -26,6 +27,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('Result:', result);
                 }
             });
+        });
+    });
+
+    affectorButton.addEventListener('click', function() {
+        affectorButton.classList.add('loading');
+        affectorButton.textContent = 'Adding...';
+        csInterface.evalScript('addAffector()', function(result) {
+            affectorButton.classList.remove('loading');
+            affectorButton.textContent = 'Add Affector';
+            if (result && result !== 'undefined') {
+                console.log('Affector result:', result);
+            }
         });
     });
 
