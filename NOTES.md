@@ -47,43 +47,44 @@ Both take up indices in the property list. This affects how you reference proper
 | 31 | group header | "Pin Edges:" |
 | **32** | popup | **Pin Direction** (1=Overscroll Stretch, 2=Collision Squish) |
 | **33** | slider | **Pin Influence** (0-100%, default 100%) |
-| **34** | slider | **Pin Trim** (0-100, default 0) |
-| 35 | label | "Top:" |
-| 36 | endLabel | (auto) |
-| **37** | checkbox | **Top** (enable top edge) |
-| **38** | slider | **Top Y** (boundary position) |
-| 39 | label | "Bottom:" |
-| 40 | endLabel | (auto) |
-| **41** | checkbox | **Bottom** (enable bottom edge) |
-| **42** | slider | **Bottom Y** (boundary position, default = comp height) |
-| 43 | label | "Left:" |
-| 44 | endLabel | (auto) |
-| **45** | checkbox | **Left** (enable left edge) |
-| **46** | slider | **Left X** (boundary position) |
-| 47 | label | "Right:" |
-| 48 | endLabel | (auto) |
-| **49** | checkbox | **Right** (enable right edge) |
-| **50** | slider | **Right X** (boundary position, default = comp width) |
-| 51 | endGroup | (auto) |
-| 52 | group header | "Children follow:" |
-| 53 | label | "" |
-| 54 | endLabel | (auto) |
-| **55** | checkbox | **Position** (in Children follow) |
-| **56** | checkbox | **Scale** (in Children follow) |
-| **57** | checkbox | **Rotation** (in Children follow) |
-| **58** | checkbox | **Opacity** (in Children follow) |
-| **59** | checkbox | **Anchor point** (in Children follow) |
-| 60 | label | "" (empty separator inside group) |
-| 61 | endLabel | (auto) |
-| 62 | endGroup | (auto) |
-| 63 | group header | "Delays apply to:" |
-| **64** | checkbox | **Position** (in Delays apply to) |
-| **65** | checkbox | **Scale** (in Delays apply to) |
-| **66** | checkbox | **Rotation** (in Delays apply to) |
-| **67** | checkbox | **Opacity** (in Delays apply to) |
-| **68** | checkbox | **Anchor point** (in Delays apply to) |
-| 69 | endGroup | (auto) |
-| **70** | slider | **Child count** (hidden)
+| **34** | slider | **Pin Stretch** (0-100%, default 100%) |
+| **35** | slider | **Pin Trim** (0-100, default 0) |
+| 36 | label | "Top:" |
+| 37 | endLabel | (auto) |
+| **38** | checkbox | **Top** (enable top edge) |
+| **39** | slider | **Top Y** (boundary position) |
+| 40 | label | "Bottom:" |
+| 41 | endLabel | (auto) |
+| **42** | checkbox | **Bottom** (enable bottom edge) |
+| **43** | slider | **Bottom Y** (boundary position, default = comp height) |
+| 44 | label | "Left:" |
+| 45 | endLabel | (auto) |
+| **46** | checkbox | **Left** (enable left edge) |
+| **47** | slider | **Left X** (boundary position) |
+| 48 | label | "Right:" |
+| 49 | endLabel | (auto) |
+| **50** | checkbox | **Right** (enable right edge) |
+| **51** | slider | **Right X** (boundary position, default = comp width) |
+| 52 | endGroup | (auto) |
+| 53 | group header | "Children follow:" |
+| 54 | label | "" |
+| 55 | endLabel | (auto) |
+| **56** | checkbox | **Position** (in Children follow) |
+| **57** | checkbox | **Scale** (in Children follow) |
+| **58** | checkbox | **Rotation** (in Children follow) |
+| **59** | checkbox | **Opacity** (in Children follow) |
+| **60** | checkbox | **Anchor point** (in Children follow) |
+| 61 | label | "" (empty separator inside group) |
+| 62 | endLabel | (auto) |
+| 63 | endGroup | (auto) |
+| 64 | group header | "Delays apply to:" |
+| **65** | checkbox | **Position** (in Delays apply to) |
+| **66** | checkbox | **Scale** (in Delays apply to) |
+| **67** | checkbox | **Rotation** (in Delays apply to) |
+| **68** | checkbox | **Opacity** (in Delays apply to) |
+| **69** | checkbox | **Anchor point** (in Delays apply to) |
+| 70 | endGroup | (auto) |
+| **71** | slider | **Child count** (hidden)
 
 ### Expression Access Pattern (FLAT INDICES ONLY)
 
@@ -114,35 +115,36 @@ var delayAfterLeaderProp = pEff(22);     // Delay after leader
 var scaleAroundMode = pEff(27).value;    // Scale around
 var rotateAroundMode = pEff(28).value;   // Rotate around
 
-// Pin Edges section (indices 32-50)
+// Pin Edges section (indices 32-51)
 var pinDirectionProp = pEff(32);         // 1=Overscroll Stretch, 2=Collision Squish
 var pinInfluenceProp = pEff(33);         // Pin influence (0-100%)
-var pinTrimProp = pEff(34);              // Pin trim (0-childCount)
-var pinTopEnabled = pEff(37).value;      // Top edge enabled
-var pinTopY = pEff(38).value;            // Top Y boundary
-var pinBottomEnabled = pEff(41).value;   // Bottom edge enabled
-var pinBottomY = pEff(42).value;         // Bottom Y boundary
-var pinLeftEnabled = pEff(45).value;     // Left edge enabled
-var pinLeftX = pEff(46).value;           // Left X boundary
-var pinRightEnabled = pEff(49).value;    // Right edge enabled
-var pinRightX = pEff(50).value;          // Right X boundary
+var pinStretchProp = pEff(34);           // Pin stretch (0-100%, default 100%)
+var pinTrimProp = pEff(35);              // Pin trim (0-childCount)
+var pinTopEnabled = pEff(38).value;      // Top edge enabled
+var pinTopY = pEff(39).value;            // Top Y boundary
+var pinBottomEnabled = pEff(42).value;   // Bottom edge enabled
+var pinBottomY = pEff(43).value;         // Bottom Y boundary
+var pinLeftEnabled = pEff(46).value;     // Left edge enabled
+var pinLeftX = pEff(47).value;           // Left X boundary
+var pinRightEnabled = pEff(50).value;    // Right edge enabled
+var pinRightX = pEff(51).value;          // Right X boundary
 
-// Children follow (indices 55-59) - FLAT INDICES, NOT GROUP ACCESS
-var followPosition = pEff(55).value;
-var followScale = pEff(56).value;
-var followRotation = pEff(57).value;
-var followOpacity = pEff(58).value;
-var followAnchorPoint = pEff(59).value;
+// Children follow (indices 56-60) - FLAT INDICES, NOT GROUP ACCESS
+var followPosition = pEff(56).value;
+var followScale = pEff(57).value;
+var followRotation = pEff(58).value;
+var followOpacity = pEff(59).value;
+var followAnchorPoint = pEff(60).value;
 
-// Delays apply to (indices 64-68) - FLAT INDICES, NOT GROUP ACCESS
-var delayPosition = pEff(64).value;
-var delayScale = pEff(65).value;
-var delayRotation = pEff(66).value;
-var delayOpacity = pEff(67).value;
-var delayAnchorPoint = pEff(68).value;
+// Delays apply to (indices 65-69) - FLAT INDICES, NOT GROUP ACCESS
+var delayPosition = pEff(65).value;
+var delayScale = pEff(66).value;
+var delayRotation = pEff(67).value;
+var delayOpacity = pEff(68).value;
+var delayAnchorPoint = pEff(69).value;
 
-// Child count (index 70)
-var childCount = pEff(70).value;
+// Child count (index 71)
+var childCount = pEff(71).value;
 ```
 
 ### ExtendScript Access (Setting Values)
@@ -548,6 +550,17 @@ How firmly the pinned layer stays at the boundary.
 - **100%**: Pinned layer stays exactly at boundary
 - **50%**: Pinned layer moves halfway past boundary
 - **0%**: No pinning effect
+
+#### Pin Stretch (0-100%, default: 100%)
+Controls how much layers spread apart when pinned.
+
+- **100%**: Full stretch - layers space out naturally from the pinned layer
+- **50%**: Half stretch - layers spread out half as much
+- **0%**: No stretch - all layers clump together at the pinned position
+
+This creates different visual effects:
+- **100% stretch**: Classic overscroll bounce where the list stretches like elastic
+- **0% stretch**: All layers pile up at the boundary (useful for collision effects)
 
 #### Pin Trim (0-childCount, default: 0)
 How many layers to exclude from the stretch/squish effect.

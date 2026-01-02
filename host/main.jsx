@@ -471,12 +471,12 @@ function setEffectValue(layer, effectName, value) {
 function setParentChildCount(parentLayer, count) {
     var effects = parentLayer.property("ADBE Effect Parade");
 
-    // Try pseudo effect mode first (index 52 for Child count)
+    // Try pseudo effect mode first (index 71 for Child count)
     for (var i = 1; i <= effects.numProperties; i++) {
         var eff = effects.property(i);
         if (eff.matchName === "Pseudo/ParentRigParent" || eff.name === "Parent Rig - Parent") {
             try {
-                eff.property(52).setValue(count);
+                eff.property(71).setValue(count);
                 return true;
             } catch (e) {
                 // Fallback to name-based access
@@ -1059,9 +1059,9 @@ function addParentEffect(layer, childCount) {
             // After undo/redo, AE sometimes returns a broken effect with no name
             if (eff.name && eff.name !== "" && eff.numProperties >= 60) {
                 pseudoEffectApplied = true;
-                // Set the child count value (index 70)
+                // Set the child count value (index 71)
                 try {
-                    eff.property(70).setValue(childCount);
+                    eff.property(71).setValue(childCount);
                 } catch (e2) {
                     try {
                         eff.property("Child count").setValue(childCount);
@@ -1070,8 +1070,8 @@ function addParentEffect(layer, childCount) {
                 // Set pin boundary defaults from comp size
                 var comp = layer.containingComp;
                 try {
-                    eff.property(42).setValue(comp.height);  // Bottom Y boundary
-                    eff.property(50).setValue(comp.width);   // Right X boundary
+                    eff.property(43).setValue(comp.height);  // Bottom Y boundary
+                    eff.property(51).setValue(comp.width);   // Right X boundary
                 } catch (e2) {}
             } else {
                 // Effect was created but is broken - remove it and try fallback
@@ -1098,7 +1098,7 @@ function addParentEffect(layer, childCount) {
                     var eff = effects.property(i);
                     if (eff.matchName === "Pseudo/ParentRigParent" || eff.name === "Parent Rig - Parent") {
                         try {
-                            eff.property(70).setValue(childCount);  // Child count
+                            eff.property(71).setValue(childCount);  // Child count
                         } catch (e2) {
                             try {
                                 eff.property("Child count").setValue(childCount);
@@ -1107,8 +1107,8 @@ function addParentEffect(layer, childCount) {
                         // Set pin boundary defaults from comp size
                         var comp = layer.containingComp;
                         try {
-                            eff.property(42).setValue(comp.height);  // Bottom Y boundary
-                            eff.property(50).setValue(comp.width);   // Right X boundary
+                            eff.property(43).setValue(comp.height);  // Bottom Y boundary
+                            eff.property(51).setValue(comp.width);   // Right X boundary
                         } catch (e2) {}
                         break;
                     }
@@ -1498,18 +1498,19 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             'var scaleAroundMode = pEff(27).value;',
             'var rotateAroundMode = pEff(28).value;',
             '',
-            '// Pinning section (indices 32-50)',
+            '// Pinning section (indices 32-51)',
             'var pinDirectionProp = pEff(32);',  // 1=Overscroll stretch, 2=Collision squish
             'var pinInfluenceProp = pEff(33);',
-            'var pinTrimProp = pEff(34);',
-            'var pinTopEnabled = pEff(37).value;',
-            'var pinTopY = pEff(38).value;',
-            'var pinBottomEnabled = pEff(41).value;',
-            'var pinBottomY = pEff(42).value;',
-            'var pinLeftEnabled = pEff(45).value;',
-            'var pinLeftX = pEff(46).value;',
-            'var pinRightEnabled = pEff(49).value;',
-            'var pinRightX = pEff(50).value;',
+            'var pinStretchProp = pEff(34);',
+            'var pinTrimProp = pEff(35);',
+            'var pinTopEnabled = pEff(38).value;',
+            'var pinTopY = pEff(39).value;',
+            'var pinBottomEnabled = pEff(42).value;',
+            'var pinBottomY = pEff(43).value;',
+            'var pinLeftEnabled = pEff(46).value;',
+            'var pinLeftX = pEff(47).value;',
+            'var pinRightEnabled = pEff(50).value;',
+            'var pinRightX = pEff(51).value;',
             '',
             '// Find leader layer by searching for the child with matching Index',
             'function findLeaderLayer() {',
@@ -1530,25 +1531,25 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    return null;',
             '}',
             '',
-            '// Children follow (indices 55-59)',
-            'var followPosition = pEff(55).value;',
-            'var followScale = pEff(56).value;',
-            'var followRotation = pEff(57).value;',
-            'var followOpacity = pEff(58).value;',
-            'var followAnchorPoint = pEff(59).value;',
+            '// Children follow (indices 56-60)',
+            'var followPosition = pEff(56).value;',
+            'var followScale = pEff(57).value;',
+            'var followRotation = pEff(58).value;',
+            'var followOpacity = pEff(59).value;',
+            'var followAnchorPoint = pEff(60).value;',
             '',
-            '// Delays apply to (indices 64-68)',
-            'var delayPosition = pEff(64).value;',
-            'var delayScale = pEff(65).value;',
-            'var delayRotation = pEff(66).value;',
-            'var delayOpacity = pEff(67).value;',
-            'var delayAnchorPoint = pEff(68).value;',
+            '// Delays apply to (indices 65-69)',
+            'var delayPosition = pEff(65).value;',
+            'var delayScale = pEff(66).value;',
+            'var delayRotation = pEff(67).value;',
+            'var delayOpacity = pEff(68).value;',
+            'var delayAnchorPoint = pEff(69).value;',
             '',
             '// Flag for whether delays apply to current transform (set per-expression)',
             'var applyDelayToThisTransform = true;',
             '',
-            '// Child count (index 70)',
-            'var childCount = pEff(70).value;',
+            '// Child count (index 71)',
+            'var childCount = pEff(71).value;',
             '',
             '// Group bounds for position-based ordering (calculated at rig time)',
             'var groupMinX = ' + groupBounds.minX + ';',
@@ -1659,6 +1660,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    ',
             '    var pinDirection = pinDirectionProp.valueAtTime(t);',  // 1=Overscroll stretch, 2=Collision squish
             '    var pinStrength = pinInfluenceProp.valueAtTime(t) / 100;',
+            '    var pinStretch = pinStretchProp.valueAtTime(t) / 100;',
             '    var trim = Math.round(pinTrimProp.valueAtTime(t));',
             '    ',
             '    // Calculate parent delta (how much parent moved from rest)',
@@ -1748,18 +1750,29 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '    var normalizedDist = distFromPinned / Math.max(maxDist, 1);',
             '    ',
             '    // Gentle curve (power 0.7): bigger effect near pinned layer',
-            '    var influence = Math.pow(normalizedDist, 0.7);',
+            '    var spacingGradient = Math.pow(normalizedDist, 0.7);',
             '    ',
-            '    // Apply pin strength',
-            '    var finalInfluence = influence + (1 - influence) * (1 - pinStrength);',
+            '    // Pin stretch controls how much layers spread apart from each other',
+            '    // At 100%: full spread (layers space out naturally)',
+            '    // At 0%: no spread (all layers clump together)',
+            '    var spreadAmount = spacingGradient * pinStretch;',
             '    ',
-            '    // Calculate offset to apply (offset * (1 - influence) moves layer toward boundary)',
+            '    // Pin influence controls how firmly the whole group stays at the boundary',
+            '    // At 100%: pinned layer stays exactly at boundary',
+            '    // At 0%: no pinning effect (group moves freely past boundary)',
+            '    var boundaryOffset = offset * pinStrength;',
+            '    ',
+            '    // Each layer gets: boundary offset minus its spread from the pinned layer',
+            '    // spreadAmount=0 (pinned layer): gets full boundaryOffset',
+            '    // spreadAmount=1 (furthest layer): gets no offset (follows parent normally)',
+            '    var layerOffset = boundaryOffset * (1 - spreadAmount);',
+            '    ',
             '    result.active = true;',
-            '    result.influence = finalInfluence;',
+            '    result.influence = 1;',
             '    if (isVertical) {',
-            '        result.offsetY = offset * (1 - finalInfluence);',
+            '        result.offsetY = layerOffset;',
             '    } else {',
-            '        result.offsetX = offset * (1 - finalInfluence);',
+            '        result.offsetX = layerOffset;',
             '    }',
             '    ',
             '    return result;',
@@ -1858,6 +1871,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds) {
             '// Pin edges not available in fallback mode',
             'var pinDirectionProp = {value: 1, valueAtTime: function(t) { return 1; }};',
             'var pinInfluenceProp = {value: 100, valueAtTime: function(t) { return 100; }};',
+            'var pinStretchProp = {value: 100, valueAtTime: function(t) { return 100; }};',
             'var pinTrimProp = {value: 0, valueAtTime: function(t) { return 0; }};',
             'var pinTopEnabled = false;',
             'var pinTopY = 0;',
