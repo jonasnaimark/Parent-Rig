@@ -3491,11 +3491,14 @@ function addChildRig() {
         var eff = null;
         var pseudoEffectApplied = false;
 
+        // Effect name includes parent layer name for reference
+        var effectName = "Child Rig - " + parent.name;
+
         // Try to add pseudo effect by matchname first (uses PresetEffects.xml)
         try {
             eff = effects.addProperty("Pseudo/ChildRig");
             if (eff && eff.numProperties >= 30) {
-                eff.name = "Child Rig";
+                eff.name = effectName;
                 pseudoEffectApplied = true;
             } else if (eff) {
                 eff.remove();
@@ -3515,9 +3518,9 @@ function addChildRig() {
                     // Find the effect we just applied
                     for (var ei = 1; ei <= effects.numProperties; ei++) {
                         var testEff = effects.property(ei);
-                        if (testEff.matchName === "Pseudo/ChildRig" || testEff.name === "Child Rig") {
+                        if (testEff.matchName === "Pseudo/ChildRig" || testEff.name === "Child Rig" || testEff.name.indexOf("Child Rig - ") === 0) {
                             eff = testEff;
-                            eff.name = "Child Rig";
+                            eff.name = effectName;
                             pseudoEffectApplied = true;
                             break;
                         }
@@ -3573,15 +3576,16 @@ function addChildRig() {
         eff(36).setValue(is3D && parentRestAnchor.length > 2 ? parentRestAnchor[2] : 0);  // Parent Rest Anchor Z
 
         // Apply expressions
-        var parentName = parent.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        applyChildRigExpressions(child, parentName, is3D);
+        var parentNameEscaped = parent.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        var effectNameEscaped = effectName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        applyChildRigExpressions(child, parentNameEscaped, effectNameEscaped, is3D);
     }
 
     app.endUndoGroup();
     return "Child Rig applied to " + layersToRig.length + " layer(s)";
 }
 
-function applyChildRigExpressions(child, parentName, is3D) {
+function applyChildRigExpressions(child, parentName, effectName, is3D) {
     // Expression header for Child Rig using pseudo effect indices
     // Index map (from test-childrig-indices.jsx):
     // 1=Influence, 2=Scale around, 3=Rotate around
@@ -3591,7 +3595,7 @@ function applyChildRigExpressions(child, parentName, is3D) {
     var header = [
         '// Child Rig Expression',
         'var parentLayer = thisComp.layer("' + parentName + '");',
-        'var eff = effect("Child Rig");',
+        'var eff = effect("' + effectName + '");',
         '',
         '// Controls',
         'var globalInfluence = eff(1).value / 100;',
