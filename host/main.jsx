@@ -65,7 +65,7 @@ function applyParentRig(optionsJSON) {
     // Check if any selected layer is already part of a rig
     var existingRig = findExistingRig(selectedLayers, comp);
     if (existingRig) {
-        alert("Selected layers are already part of a Parent Rig.\n\nUse 'Update Parent Rig' to change settings or 'Remove Parent Rig' to remove it.");
+        alert("Selected layers are already part of a Parent Rig.\n\nUse 'Remove Parent Rig' first, then apply again with new settings.");
         return "error";
     }
 
