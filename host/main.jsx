@@ -1780,8 +1780,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             'var delayAfterLeaderProp = pEff(22);',
             '',
             '// Transform type popups (indices 27-28): 1=Child, 2=Parent, 3=Leader',
-            'var scaleAroundMode = pEff(27).value;',
-            'var rotateAroundMode = pEff(28).value;',
+            'var scaleAroundMode = 1; try { scaleAroundMode = pEff(27).value; } catch(e) {}',
+            'var rotateAroundMode = 1; try { rotateAroundMode = pEff(28).value; } catch(e) {}',
+            '// Convert to number to ensure proper comparison',
+            'scaleAroundMode = Number(scaleAroundMode) || 1;',
+            'rotateAroundMode = Number(rotateAroundMode) || 1;',
             '',
             '// Pinning section (indices 32-51)',
             'var pinDirectionProp = pEff(32);',  // 1=Overscroll stretch, 2=Collision squish
@@ -2985,22 +2988,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '        }',
         '    }',
         '    ',
-        '    // Use simple delay for transform-around-pivot (independent of position keyframes)',
-        '    var transformDelay = getDelayAtTime(time);',
-        '    var transformT = time - transformDelay;',
-        '    var transformInfluence = childInfluence * parentInfluenceProp.valueAtTime(time) / 100 * getPinInfluenceMultiplier(time);',
-        '    ',
         '    // Apply scale around pivot first (scale before rotation in transform order)',
         '    if (scaleAroundMode > 1 && scalePivotPos !== null) {',
         '        var offsetFromPivot = sub(restPos, scalePivotPos);',
         '        var currentOffset = [offsetFromPivot[0], offsetFromPivot[1]' + (is3D ? ', offsetFromPivot[2]' : '') + '];',
         '        var scaleProp = parentLayer.transform.scale;',
-        '        var parentScaleT = scaleProp.valueAtTime(transformT);',
+        '        // Use getRemapInfo for proper delay + stretch timing',
+        '        var scaleRemapInfo = getRemapInfo(time, scaleProp);',
+        '        var parentScaleT = scaleProp.valueAtTime(scaleRemapInfo.t1);',
+        '        var scaleInfluence = scaleRemapInfo.segInfluence * childInfluence;',
         '        currentOffset[0] *= parentScaleT[0] / parentRestScale[0];',
         '        currentOffset[1] *= parentScaleT[1] / parentRestScale[1];',
         (is3D ? '        if (currentOffset.length > 2) currentOffset[2] *= (parentScaleT[2] || 100) / 100;' : ''),
         '        var scaleDelta = sub(currentOffset, offsetFromPivot);',
-        '        scaleDelta = mul(scaleDelta, transformInfluence);',
+        '        scaleDelta = mul(scaleDelta, scaleInfluence);',
         '        parentedPos = add(parentedPos, scaleDelta);',
         '    }',
         '    ',
@@ -3009,7 +3010,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '        var offsetFromPivot = sub(restPos, rotatePivotPos);',
         '        var currentOffset = [offsetFromPivot[0], offsetFromPivot[1]' + (is3D ? ', offsetFromPivot[2]' : '') + '];',
         '        var rotProp = parentLayer.transform.rotation;',
-        '        var parentRotT = rotProp.valueAtTime(transformT);',
+        '        // Use getRemapInfo for proper delay + stretch timing',
+        '        var rotRemapInfo = getRemapInfo(time, rotProp);',
+        '        var rotateInfluence = rotRemapInfo.segInfluence * childInfluence;',
+        '        var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
         '        var rotDelta = parentRotT - parentRestRot;',
         '        var rad = rotDelta * Math.PI / 180;',
         '        var cosR = Math.cos(rad);',
@@ -3018,7 +3022,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '        var ry = currentOffset[0] * sinR + currentOffset[1] * cosR;',
         '        var rotatedOffset = [rx, ry' + (is3D ? ', currentOffset[2]' : '') + '];',
         '        var rotateDelta = sub(rotatedOffset, offsetFromPivot);',
-        '        rotateDelta = mul(rotateDelta, transformInfluence);',
+        '        rotateDelta = mul(rotateDelta, rotateInfluence);',
         '        parentedPos = add(parentedPos, rotateDelta);',
         '    }',
         '}',
@@ -3092,15 +3096,25 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var restRot = cp("Rest Rotation");',
         'var parentRestRot = cp("Parent Rest Rotation");',
         '',
-        '// Get accumulated rotation delta from all segments, weighted by each segment\'s influence',
         'var rotProp = parentLayer.transform.rotation;',
-        'var accRotDelta = getAccumulatedScalarDelta(time, rotProp, parentRestRot);',
+        'var accRotDelta;',
         '',
-        '// If before first segment, use simple delay-based remapping',
-        'if (accRotDelta === null) {',
-        '    var remapInfo = getRemapInfo(time, rotProp);',
-        '    var parentRot = rotProp.valueAtTime(remapInfo.t1);',
-        '    accRotDelta = (parentRot - parentRestRot) * remapInfo.segInfluence;',
+        '// When rotateAroundMode > 1 (Parent or Leader), use same timing as orbit position',
+        '// so rotation and position stay in sync (like native parenting)',
+        'if (rotateAroundMode > 1) {',
+        '    var rotRemapInfo = getRemapInfo(time, rotProp);',
+        '    var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
+        '    accRotDelta = (parentRotT - parentRestRot) * rotRemapInfo.segInfluence * childInfluence;',
+        '} else {',
+        '    // Normal rotation following (Child mode) - uses accumulated delta',
+        '    accRotDelta = getAccumulatedScalarDelta(time, rotProp, parentRestRot);',
+        '    ',
+        '    // If before first segment, use simple delay-based remapping',
+        '    if (accRotDelta === null) {',
+        '        var remapInfo = getRemapInfo(time, rotProp);',
+        '        var parentRot = rotProp.valueAtTime(remapInfo.t1);',
+        '        accRotDelta = (parentRot - parentRestRot) * remapInfo.segInfluence;',
+        '    }',
         '}',
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
@@ -3126,23 +3140,27 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var restRot = cp("Rest X Rotation");',
         'var parentRestRot = cp("Parent Rest X Rotation");',
         '',
-        '// Get accumulated X rotation delta from all segments',
         'var rotProp = parentLayer.transform.xRotation;',
-        'var accRotDelta = getAccumulatedScalarDelta(time, rotProp, parentRestRot);',
+        'var accRotDelta;',
         '',
-        '// If before first segment, use simple delay-based remapping',
-        'if (accRotDelta === null) {',
-        '    var remapInfo = getRemapInfo(time, rotProp);',
-        '    var parentRot = rotProp.valueAtTime(remapInfo.t1);',
-        '    accRotDelta = (parentRot - parentRestRot) * remapInfo.segInfluence;',
+        '// When rotateAroundMode > 1, use same timing as orbit position',
+        'if (rotateAroundMode > 1) {',
+        '    var rotRemapInfo = getRemapInfo(time, rotProp);',
+        '    var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
+        '    accRotDelta = (parentRotT - parentRestRot) * rotRemapInfo.segInfluence * childInfluence;',
+        '} else {',
+        '    accRotDelta = getAccumulatedScalarDelta(time, rotProp, parentRestRot);',
+        '    if (accRotDelta === null) {',
+        '        var remapInfo = getRemapInfo(time, rotProp);',
+        '        var parentRot = rotProp.valueAtTime(remapInfo.t1);',
+        '        accRotDelta = (parentRot - parentRestRot) * remapInfo.segInfluence;',
+        '    }',
         '}',
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
-        '',
         'var childAnimRot = value;',
         'var childRotDelta = childAnimRot - restRot;',
         '',
-        '// Check if following rotation is enabled',
         'followRotation ? parentDrivenRot + childRotDelta : childAnimRot;'
     ].join('\n');
 
@@ -3155,23 +3173,27 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var restRot = cp("Rest Y Rotation");',
         'var parentRestRot = cp("Parent Rest Y Rotation");',
         '',
-        '// Get accumulated Y rotation delta from all segments',
         'var rotProp = parentLayer.transform.yRotation;',
-        'var accRotDelta = getAccumulatedScalarDelta(time, rotProp, parentRestRot);',
+        'var accRotDelta;',
         '',
-        '// If before first segment, use simple delay-based remapping',
-        'if (accRotDelta === null) {',
-        '    var remapInfo = getRemapInfo(time, rotProp);',
-        '    var parentRot = rotProp.valueAtTime(remapInfo.t1);',
-        '    accRotDelta = (parentRot - parentRestRot) * remapInfo.segInfluence;',
+        '// When rotateAroundMode > 1, use same timing as orbit position',
+        'if (rotateAroundMode > 1) {',
+        '    var rotRemapInfo = getRemapInfo(time, rotProp);',
+        '    var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
+        '    accRotDelta = (parentRotT - parentRestRot) * rotRemapInfo.segInfluence * childInfluence;',
+        '} else {',
+        '    accRotDelta = getAccumulatedScalarDelta(time, rotProp, parentRestRot);',
+        '    if (accRotDelta === null) {',
+        '        var remapInfo = getRemapInfo(time, rotProp);',
+        '        var parentRot = rotProp.valueAtTime(remapInfo.t1);',
+        '        accRotDelta = (parentRot - parentRestRot) * remapInfo.segInfluence;',
+        '    }',
         '}',
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
-        '',
         'var childAnimRot = value;',
         'var childRotDelta = childAnimRot - restRot;',
         '',
-        '// Check if following rotation is enabled',
         'followRotation ? parentDrivenRot + childRotDelta : childAnimRot;'
     ].join('\n');
 
@@ -3343,18 +3365,20 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D) {
         '    ',
         (needsBothAxes ? '    var offsetX = restPosX - (scaleAroundMode === 3 ? scalePivotX : parentRestPosX);' : ''),
         (needsBothAxes ? '    var offsetY = restPosY - (scaleAroundMode === 3 ? scalePivotY : parentRestPosY);' : ''),
-        (needsBothAxes ? '    var rotOffsetX = restPosX - (rotateAroundMode === 3 ? rotatePivotX : parentRestPosX);' : ''),
-        (needsBothAxes ? '    var rotOffsetY = restPosY - (rotateAroundMode === 3 ? rotatePivotY : parentRestPosY);' : ''),
+        (needsBothAxes ? '    var rotOffsetX = restPosX - rotatePivotX;' : ''),
+        (needsBothAxes ? '    var rotOffsetY = restPosY - rotatePivotY;' : ''),
         '    ',
-        '    // Use simple delay for transform-around-pivot (independent of position keyframes)',
-        '    var transformDelay = getDelayAtTime(time);',
-        '    var transformT = time - transformDelay;',
-        '    var transformInfluence = childInfluence * parentInfluenceProp.valueAtTime(time) / 100 * getPinInfluenceMultiplier(time);',
+        '    // Variables for influence (set by getRemapInfo in each block)',
+        '    var scaleInfluence = 0;',
+        '    var rotateInfluence = 0;',
         '    ',
         '    // Apply scale around pivot',
         '    if (scaleAroundMode > 1 && !skipScaleTransform) {',
         '        var scaleProp = parentLayer.transform.scale;',
-        '        var parentScaleT = scaleProp.valueAtTime(transformT);',
+        '        // Use getRemapInfo for proper delay + stretch timing',
+        '        var scaleRemapInfo = getRemapInfo(time, scaleProp);',
+        '        scaleInfluence = scaleRemapInfo.segInfluence * childInfluence;',
+        '        var parentScaleT = scaleProp.valueAtTime(scaleRemapInfo.t1);',
         (needsBothAxes ? '        offsetX *= parentScaleT[0] / parentRestScaleX;' : ''),
         (needsBothAxes ? '        offsetY *= parentScaleT[1] / parentRestScaleY;' : ''),
         '    }',
@@ -3362,7 +3386,10 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D) {
         '    // Apply rotation around pivot',
         '    if (rotateAroundMode > 1 && !skipRotateTransform) {',
         '        var rotProp = parentLayer.transform.rotation;',
-        '        var parentRotT = rotProp.valueAtTime(transformT);',
+        '        // Use getRemapInfo for proper delay + stretch timing',
+        '        var rotRemapInfo = getRemapInfo(time, rotProp);',
+        '        rotateInfluence = rotRemapInfo.segInfluence * childInfluence;',
+        '        var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
         '        var rotDelta = parentRotT - parentRestRot;',
         '        var rad = rotDelta * Math.PI / 180;',
         '        var cosR = Math.cos(rad);',
@@ -3375,13 +3402,13 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D) {
         '    ',
         '    // Calculate transform deltas for this axis',
         (axis === 'X' ? '    var scaleOriginalOffset = restPosX - (scaleAroundMode === 3 ? scalePivotX : parentRestPosX);' : ''),
-        (axis === 'X' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetX - scaleOriginalOffset) * transformInfluence;' : ''),
-        (axis === 'X' ? '    var rotOriginalOffset = restPosX - (rotateAroundMode === 3 ? rotatePivotX : parentRestPosX);' : ''),
-        (axis === 'X' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetX - rotOriginalOffset) * transformInfluence;' : ''),
+        (axis === 'X' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetX - scaleOriginalOffset) * scaleInfluence;' : ''),
+        (axis === 'X' ? '    var rotOriginalOffset = restPosX - rotatePivotX;' : ''),
+        (axis === 'X' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetX - rotOriginalOffset) * rotateInfluence;' : ''),
         (axis === 'Y' ? '    var scaleOriginalOffset = restPosY - (scaleAroundMode === 3 ? scalePivotY : parentRestPosY);' : ''),
-        (axis === 'Y' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetY - scaleOriginalOffset) * transformInfluence;' : ''),
-        (axis === 'Y' ? '    var rotOriginalOffset = restPosY - (rotateAroundMode === 3 ? rotatePivotY : parentRestPosY);' : ''),
-        (axis === 'Y' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetY - rotOriginalOffset) * transformInfluence;' : ''),
+        (axis === 'Y' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetY - scaleOriginalOffset) * scaleInfluence;' : ''),
+        (axis === 'Y' ? '    var rotOriginalOffset = restPosY - rotatePivotY;' : ''),
+        (axis === 'Y' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetY - rotOriginalOffset) * rotateInfluence;' : ''),
         (axis === 'Z' ? '    var scaleDelta = 0; // Z transform around pivot not supported in split dimensions' : ''),
         (axis === 'Z' ? '    var rotateDelta = 0;' : ''),
         '    parentedPos += scaleDelta + rotateDelta;',
@@ -3573,6 +3600,87 @@ function addGrid() {
             // Parent to null
             layer.parent = parentNull;
         }
+    }
+
+    // Select parent for easy rigging
+    for (var i = 1; i <= comp.numLayers; i++) {
+        comp.layer(i).selected = false;
+    }
+    parentNull.selected = true;
+
+    app.endUndoGroup();
+}
+
+function addRadialCarousel() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return;
+    }
+
+    app.beginUndoGroup("Add Radial Carousel");
+
+    var numShapes = 19;
+    var shapeWidth = 220;
+    var shapeHeight = 220;
+    var cornerRadius = 32;
+    var gap = 20;
+    var fillColor = [0, 0, 0, 1]; // Black
+
+    // Much larger radius for subtle arc
+    var radius = 4000;
+
+    // Calculate arc angle based on item size + gap at the circumference
+    var itemArcLength = shapeWidth + gap;
+    var degreesPerItem = (itemArcLength / radius) * (180 / Math.PI);
+
+    // Parent position: center item should be at middle of artboard
+    // So parent is radius distance below the center
+    var parentX = comp.width / 2;
+    var parentY = (comp.height / 2) + radius;
+
+    // Create parent shape layer
+    var parentNull = comp.layers.addShape();
+    parentNull.name = "Radial Parent";
+    parentNull.transform.position.setValue([parentX, parentY]);
+    parentNull.label = 9; // Green
+
+    // Create shapes arranged in an arc
+    // Center item (index 9, 0-based) is at top (angle -90 degrees from parent)
+    var centerIndex = Math.floor(numShapes / 2);
+
+    for (var i = 0; i < numShapes; i++) {
+        var layer = comp.layers.addShape();
+        layer.name = "Item " + (i + 1);
+
+        // Add rectangle shape
+        var contents = layer.property("ADBE Root Vectors Group");
+        var rectGroup = contents.addProperty("ADBE Vector Group");
+        rectGroup.name = "Rectangle";
+
+        var rectPath = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Shape - Rect");
+        rectPath.property("ADBE Vector Rect Size").setValue([shapeWidth, shapeHeight]);
+        rectPath.property("ADBE Vector Rect Roundness").setValue(cornerRadius);
+
+        var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
+        fill.property("ADBE Vector Fill Color").setValue(fillColor);
+
+        // Calculate angle: center item is at -90 degrees (straight up)
+        var offsetFromCenter = i - centerIndex;
+        var angleDegrees = -90 + (offsetFromCenter * degreesPerItem);
+        var angleRadians = angleDegrees * Math.PI / 180;
+
+        // Position on circle
+        var x = parentX + Math.cos(angleRadians) * radius;
+        var y = parentY + Math.sin(angleRadians) * radius;
+        layer.transform.position.setValue([x, y]);
+
+        // Rotation: items rotate to face tangent to circle
+        var rotation = offsetFromCenter * degreesPerItem;
+        layer.transform.rotation.setValue(rotation);
+
+        // Parent to null
+        layer.parent = parentNull;
     }
 
     // Select parent for easy rigging

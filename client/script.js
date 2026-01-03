@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var horizontalButton = document.getElementById('addHorizontal');
     var verticalButton = document.getElementById('addVertical');
     var gridButton = document.getElementById('addGrid');
+    var radialButton = document.getElementById('addRadial');
 
     applyButton.addEventListener('click', function() {
         applyButton.classList.add('loading');
@@ -52,5 +53,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     gridButton.addEventListener('click', function() {
         csInterface.evalScript('addGrid()');
+    });
+
+    radialButton.addEventListener('click', function() {
+        csInterface.evalScript('addRadialCarousel()');
     });
 });
