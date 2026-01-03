@@ -17,7 +17,31 @@ var extensionRoot = "";
 // MAIN LOGIC
 // ============================================
 
-function applyParentRig() {
+// Helper to parse follow options from JSON
+function parseFollowOptions(optionsJSON) {
+    var followOptions = {
+        position: true,
+        scale: true,
+        rotation: true,
+        opacity: true,
+        anchor: true
+    };
+    if (optionsJSON) {
+        try {
+            var parsed = JSON.parse(optionsJSON);
+            if (typeof parsed.position === 'boolean') followOptions.position = parsed.position;
+            if (typeof parsed.scale === 'boolean') followOptions.scale = parsed.scale;
+            if (typeof parsed.rotation === 'boolean') followOptions.rotation = parsed.rotation;
+            if (typeof parsed.opacity === 'boolean') followOptions.opacity = parsed.opacity;
+            if (typeof parsed.anchor === 'boolean') followOptions.anchor = parsed.anchor;
+        } catch (e) {}
+    }
+    return followOptions;
+}
+
+function applyParentRig(optionsJSON) {
+    var followOptions = parseFollowOptions(optionsJSON);
+
     // Debug: Check if extensionRoot is set
     if (typeof extensionRoot === "undefined" || extensionRoot === "") {
         extensionRoot = "";  // Ensure it's at least an empty string
@@ -36,7 +60,14 @@ function applyParentRig() {
 
     var result = "error";
     var selectedLayers = comp.selectedLayers;
-    var messageToShow = null;  // Defer alerts until after undo group closes
+    var messageToShow = null;
+
+    // Check if any selected layer is already part of a rig
+    var existingRig = findExistingRig(selectedLayers, comp);
+    if (existingRig) {
+        alert("Selected layers are already part of a Parent Rig.\n\nUse 'Update Parent Rig' to change settings or 'Remove Parent Rig' to remove it.");
+        return "error";
+    }
 
     app.beginUndoGroup("Apply Parent Rig");
 
@@ -44,60 +75,21 @@ function applyParentRig() {
         // Check if selected layers should be ADDED to an existing rig
         var addToRigResult = checkForAddToRig(selectedLayers, comp);
         if (addToRigResult) {
-            addLayersToExistingRig(addToRigResult.parent, addToRigResult.newChildren, comp);
+            addLayersToExistingRig(addToRigResult.parent, addToRigResult.newChildren, comp, followOptions);
             result = "success";
         } else {
-            // Check if any selected layer is already part of a rig
-            var existingRig = findExistingRig(selectedLayers, comp);
-            if (existingRig) {
-                // Check if selected rigged children are still parented to the rig parent
-                // If so, user wants to re-index (not unrig)
-                var wantsReindex = false;
-                for (var r = 0; r < selectedLayers.length; r++) {
-                    var sl = selectedLayers[r];
-                    if (isRiggedChild(sl) && sl.parent !== null && sl.parent.index === existingRig.parent.index) {
-                        wantsReindex = true;
-                        break;
-                    }
-                }
+            // Find parent-child relationships from selection
+            var relationships = findParentChildRelationships(selectedLayers, comp);
 
-                if (wantsReindex) {
-                    // Re-index all children automatically
-                    var allChildren = findRiggedChildren(existingRig.parent, comp);
-                    allChildren.sort(function(a, b) { return a.index - b.index; });
-                    for (var ri = 0; ri < allChildren.length; ri++) {
-                        // Reverse index order: bottom layer in timeline = index 1 (animates first)
-                        setEffectValue(allChildren[ri], "PR_Index", allChildren.length - ri);
-                        // Remove native parenting (rig uses expressions instead)
-                        if (allChildren[ri].parent !== null) {
-                            allChildren[ri].parent = null;
-                        }
-                        // Clean up any parent effect that shouldn't be on a child layer
-                        removeEffect(allChildren[ri], "Parent Rig - Parent");
-                        removeEffect(allChildren[ri], "PR_Delay");
-                    }
-                    setParentChildCount(existingRig.parent, allChildren.length);
-                    result = "success";
-                } else {
-                    // Not parented to rig parent - assume they want to unrig
-                    unrigLayers(existingRig.parent, existingRig.children, comp);
-                    messageToShow = "Parent Rig removed. Normal parenting restored.";
-                    result = "success";
-                }
+            if (relationships.length === 0) {
+                messageToShow = "No parent-child relationships found in selection.\n\nMake sure selected layers have a parent assigned.";
             } else {
-                // Find parent-child relationships from selection
-                var relationships = findParentChildRelationships(selectedLayers, comp);
-
-                if (relationships.length === 0) {
-                    messageToShow = "No parent-child relationships found in selection.\n\nMake sure selected layers have a parent assigned.";
-                } else {
-                    // Apply rig to each parent-children group
-                    for (var i = 0; i < relationships.length; i++) {
-                        var rel = relationships[i];
-                        rigParentChildGroup(rel.parent, rel.children, comp);
-                    }
-                    result = "success";
+                // Apply rig to each parent-children group
+                for (var i = 0; i < relationships.length; i++) {
+                    var rel = relationships[i];
+                    rigParentChildGroup(rel.parent, rel.children, comp, followOptions);
                 }
+                result = "success";
             }
         }
     } catch (e) {
@@ -106,7 +98,48 @@ function applyParentRig() {
 
     app.endUndoGroup();
 
-    // Show any deferred messages AFTER undo group is closed
+    if (messageToShow) {
+        alert(messageToShow);
+    }
+
+    return result;
+}
+
+function removeParentRig() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return "error";
+    }
+
+    if (comp.selectedLayers.length === 0) {
+        alert("Please select a layer that is part of a Parent Rig.");
+        return "error";
+    }
+
+    var selectedLayers = comp.selectedLayers;
+    var existingRig = findExistingRig(selectedLayers, comp);
+
+    if (!existingRig) {
+        alert("No Parent Rig found on selected layers.");
+        return "error";
+    }
+
+    var result = "error";
+    var messageToShow = null;
+
+    app.beginUndoGroup("Remove Parent Rig");
+
+    try {
+        unrigLayers(existingRig.parent, existingRig.children, comp);
+        messageToShow = "Parent Rig removed. Normal parenting restored.";
+        result = "success";
+    } catch (e) {
+        messageToShow = "Error: " + e.toString() + "\nLine: " + e.line;
+    }
+
+    app.endUndoGroup();
+
     if (messageToShow) {
         alert(messageToShow);
     }
@@ -336,7 +369,7 @@ function checkForAddToRig(selectedLayers, comp) {
 }
 
 // Add new layers to an existing rig
-function addLayersToExistingRig(parent, newChildren, comp) {
+function addLayersToExistingRig(parent, newChildren, comp, followOptions) {
     var currentTime = comp.time;
     var is3D = parent.threeDLayer;
     var parentSplitDims = parent.transform.position.dimensionsSeparated;
@@ -416,7 +449,7 @@ function addLayersToExistingRig(parent, newChildren, comp) {
             childWorldPosAtRest, childRestScale, childRestRot, childRestXRot, childRestYRot, childRestOpacity, childRestAnchor,
             parentRestPos, parentRestScale, parentRestRot, parentRestXRot, parentRestYRot, parentRestOpacity, parentRestAnchor, is3D);
 
-        applyExpressions(child, parent, comp, is3D, parentSplitDims);
+        applyExpressions(child, parent, comp, is3D, parentSplitDims, null, null, followOptions);
     }
 
     var allChildren = findRiggedChildren(parent, comp);
@@ -501,7 +534,7 @@ function findExistingRig(selectedLayers, comp) {
             return { parent: layer, children: children };
         }
 
-        if (hasEffect(layer, "PR_Index")) {
+        if (isRiggedChild(layer)) {
             // Find parent by searching for rigged parent layer
             // This is more robust than using stored index which breaks on layer reorder
             var parentLayer = findParentRigLayer(comp);
@@ -529,6 +562,21 @@ function findRiggedChildren(parentLayer, comp) {
     var children = [];
     for (var i = 1; i <= comp.numLayers; i++) {
         var layer = comp.layer(i);
+        if (!layer) continue;
+
+        // Skip the parent layer itself
+        if (parentLayer && layer.index === parentLayer.index) {
+            continue;
+        }
+
+        // Validate layer is accessible
+        try {
+            var testName = layer.name;
+            if (!testName) continue;
+        } catch (e) {
+            continue; // Skip inaccessible layers
+        }
+
         // Check for old slider format OR pseudo effect (by matchName since name may be empty)
         if (hasEffect(layer, "PR_Index") || hasEffect(layer, "Pseudo/ParentRigChild")) {
             // For single-rig comps, all layers with child effect are children of the parent rig
@@ -566,14 +614,25 @@ function unrigLayers(parent, children, comp) {
     var originalParent = null;
     var actualChildren = children;
 
-    // Check if parent is a created rig layer
+    // Check if parent is a created rig layer (has " - Parent Rig" suffix)
     if (isCreatedRigLayer(parent)) {
-        // Find the original parent among children
+        // Find the original parent among children by name matching
         var baseName = parent.name.replace(" - Parent Rig", "");
         for (var i = 0; i < children.length; i++) {
             if (children[i].name === baseName) {
                 originalParent = children[i];
                 break;
+            }
+        }
+
+        // Fallback: if no name match, check for child with Parent Rig - Parent effect
+        // (This shouldn't happen, but handles edge cases)
+        if (!originalParent) {
+            for (var i = 0; i < children.length; i++) {
+                if (hasEffect(children[i], "Parent Rig - Parent") || hasEffect(children[i], "Pseudo/ParentRigParent")) {
+                    originalParent = children[i];
+                    break;
+                }
             }
         }
 
@@ -628,7 +687,52 @@ function unrigLayers(parent, children, comp) {
             }
         } catch (e) {}
 
-        child.parent = restoreParent;
+        // Only re-parent if this isn't the restoreParent itself
+        if (child.index !== restoreParent.index) {
+            try {
+                // Get child's current world position before re-parenting
+                var worldPos = child.transform.position.value;
+
+                // Set the parent
+                child.parent = restoreParent;
+
+                // Convert world position to local position relative to new parent
+                // AE automatically adjusts, but we need to set position to maintain visual location
+                var parentAnchor = restoreParent.transform.anchorPoint.value;
+                var parentPos = restoreParent.transform.position.value;
+                var parentScale = restoreParent.transform.scale.value;
+                var parentRot = restoreParent.transform.rotation.value;
+
+                // Calculate local position
+                var dx = worldPos[0] - parentPos[0];
+                var dy = worldPos[1] - parentPos[1];
+
+                // Account for parent rotation
+                var rad = -parentRot * Math.PI / 180;
+                var cosR = Math.cos(rad);
+                var sinR = Math.sin(rad);
+                var rotatedX = dx * cosR - dy * sinR;
+                var rotatedY = dx * sinR + dy * cosR;
+
+                // Account for parent scale
+                var localX = rotatedX / (parentScale[0] / 100) + parentAnchor[0];
+                var localY = rotatedY / (parentScale[1] / 100) + parentAnchor[1];
+
+                var localPos = [localX, localY];
+                if (worldPos.length > 2) {
+                    var dz = worldPos[2] - (parentPos.length > 2 ? parentPos[2] : 0);
+                    var localZ = dz / ((parentScale.length > 2 ? parentScale[2] : 100) / 100) + (parentAnchor.length > 2 ? parentAnchor[2] : 0);
+                    localPos.push(localZ);
+                }
+
+                // Only set position if no keyframes
+                if (child.transform.position.numKeys === 0) {
+                    child.transform.position.setValue(localPos);
+                }
+            } catch (parentErr) {
+                // Silently skip - layer will be unrigged but position may not be perfect
+            }
+        }
         removeAllPREffects(child);
     }
 
@@ -676,6 +780,8 @@ function findParentChildRelationships(selectedLayers, comp) {
     var relationships = [];
     var processedParents = {};
 
+    // First priority: find relationships where selected layers have a parent assigned
+    // This is the most common case - user selects children that are parented to something
     for (var i = 0; i < selectedLayers.length; i++) {
         var layer = selectedLayers[i];
 
@@ -689,33 +795,41 @@ function findParentChildRelationships(selectedLayers, comp) {
                     children: []
                 };
 
+                // Find ALL layers that have this parent
                 for (var j = 1; j <= comp.numLayers; j++) {
                     var otherLayer = comp.layer(j);
-                    if (otherLayer.parent === parentLayer) {
+                    if (otherLayer.parent !== null && otherLayer.parent.index === parentLayer.index) {
                         processedParents[parentId].children.push(otherLayer);
                     }
                 }
             }
         }
+    }
 
-        for (var j = 1; j <= comp.numLayers; j++) {
-            var otherLayer = comp.layer(j);
-            if (otherLayer.parent === layer) {
-                var layerId = layer.index;
-                if (!processedParents[layerId]) {
-                    processedParents[layerId] = {
-                        parent: layer,
-                        children: []
-                    };
-                }
-                var alreadyAdded = false;
-                for (var k = 0; k < processedParents[layerId].children.length; k++) {
-                    if (processedParents[layerId].children[k].index === otherLayer.index) {
-                        alreadyAdded = true;
-                        break;
+    // Second priority: only if no parent-child relationships found above,
+    // check if selected layers themselves have children
+    // (This handles the case where user selects the parent layer directly)
+    var hasAnyParents = false;
+    for (var p in processedParents) {
+        if (processedParents.hasOwnProperty(p)) {
+            hasAnyParents = true;
+            break;
+        }
+    }
+    if (!hasAnyParents) {
+        for (var i = 0; i < selectedLayers.length; i++) {
+            var layer = selectedLayers[i];
+            var layerId = layer.index;
+
+            for (var j = 1; j <= comp.numLayers; j++) {
+                var otherLayer = comp.layer(j);
+                if (otherLayer.parent !== null && otherLayer.parent.index === layer.index) {
+                    if (!processedParents[layerId]) {
+                        processedParents[layerId] = {
+                            parent: layer,
+                            children: []
+                        };
                     }
-                }
-                if (!alreadyAdded) {
                     processedParents[layerId].children.push(otherLayer);
                 }
             }
@@ -861,7 +975,7 @@ function getExistingParentRestValues(children, is3D) {
     return null; // No existing rig found
 }
 
-function rigParentChildGroup(parent, children, comp) {
+function rigParentChildGroup(parent, children, comp, followOptions) {
     var currentTime = comp.time;
     var originalParent = parent;  // Keep reference to original
     var rigLayerCreated = false;
@@ -882,6 +996,13 @@ function rigParentChildGroup(parent, children, comp) {
 
         // Use the rig layer as the new parent
         parent = rigLayer;
+    } else {
+        // Parent is null/empty shape - rename it and recolor to indicate it's a rig parent
+        if (parent.name.indexOf(" - Parent Rig") === -1) {
+            parent.name = parent.name + " - Parent Rig";
+        }
+        // Set label color to fuchsia (13) to make it stand out
+        parent.label = 13;
     }
 
     var is3D = originalParent.threeDLayer;
@@ -932,6 +1053,23 @@ function rigParentChildGroup(parent, children, comp) {
     }
 
     addParentEffect(parent, children.length);
+
+    // Set the "Children follow" checkboxes in the parent effect to match panel options
+    // This makes the effect UI reflect what's actually applied (indices 56-60)
+    try {
+        var pEffects = parent.property("ADBE Effect Parade");
+        for (var pe = 1; pe <= pEffects.numProperties; pe++) {
+            if (pEffects.property(pe).matchName === "Pseudo/ParentRigParent") {
+                var pEff = pEffects.property(pe);
+                pEff(56).setValue(followOptions.position ? 1 : 0);  // Position
+                pEff(57).setValue(followOptions.scale ? 1 : 0);     // Scale
+                pEff(58).setValue(followOptions.rotation ? 1 : 0);  // Rotation
+                pEff(59).setValue(followOptions.opacity ? 1 : 0);   // Opacity
+                pEff(60).setValue(followOptions.anchor ? 1 : 0);    // Anchor point
+                break;
+            }
+        }
+    } catch (e) {}
 
     // First pass: collect all children's world positions for bounds calculation
     var childData = [];
@@ -1027,21 +1165,29 @@ function rigParentChildGroup(parent, children, comp) {
 
         data.child.parent = null;
 
+        // Set position to world coordinates (since we removed native parenting)
+        // Skip if property has keyframes - expression will handle it
         if (parentSplitDims) {
-            data.child.transform.xPosition.setValue(data.childWorldPos[0]);
-            data.child.transform.yPosition.setValue(data.childWorldPos[1]);
-            if (is3D && data.childWorldPos.length > 2) {
+            if (data.child.transform.xPosition.numKeys === 0) {
+                data.child.transform.xPosition.setValue(data.childWorldPos[0]);
+            }
+            if (data.child.transform.yPosition.numKeys === 0) {
+                data.child.transform.yPosition.setValue(data.childWorldPos[1]);
+            }
+            if (is3D && data.childWorldPos.length > 2 && data.child.transform.zPosition.numKeys === 0) {
                 data.child.transform.zPosition.setValue(data.childWorldPos[2]);
             }
         } else {
-            data.child.transform.position.setValue(data.childWorldPos);
+            if (data.child.transform.position.numKeys === 0) {
+                data.child.transform.position.setValue(data.childWorldPos);
+            }
         }
 
         addChildEffect(data.child, data.childIndex, parent.index,
             data.childWorldPos, data.childRestScale, data.childRestRot, data.childRestXRot, data.childRestYRot, data.childRestOpacity, data.childRestAnchor,
             parentRestPos, parentRestScale, parentRestRot, parentRestXRot, parentRestYRot, parentRestOpacity, parentRestAnchor, is3D);
 
-        applyExpressions(data.child, parent, comp, is3D, parentSplitDims, groupBounds);
+        applyExpressions(data.child, parent, comp, is3D, parentSplitDims, groupBounds, null, followOptions);
     }
 }
 
@@ -1698,22 +1844,59 @@ function updateExistingRigsWithAffector(comp) {
 // EXPRESSION GENERATION
 // ============================================
 
-function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, existingRestPos) {
-    var parentName = parent.name.replace(/"/g, '\\"');
+function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, existingRestPos, followOptions) {
+    // Default followOptions if not provided (all enabled for backward compatibility)
+    if (!followOptions) {
+        followOptions = { position: true, scale: true, rotation: true, opacity: true, anchor: true };
+    }
+
+    // Default groupBounds if not provided (for update operations)
+    if (!groupBounds) {
+        groupBounds = { minX: 0, maxX: 1920, minY: 0, maxY: 1080, centerX: 960, centerY: 540 };
+    }
+
+    // Validate inputs with detailed error catching
+    var parentNameEscaped, childName;
+    try {
+        if (parent === null || parent === undefined) {
+            throw new Error("parent is null/undefined");
+        }
+        if (child === null || child === undefined) {
+            throw new Error("child is null/undefined");
+        }
+        parentNameEscaped = String(parent.name).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        childName = String(child.name);
+        if (!parentNameEscaped) {
+            throw new Error("parent has empty name");
+        }
+    } catch (validationErr) {
+        throw new Error("applyExpressions validation failed: " + validationErr.toString());
+    }
 
     // Get child's rest position - use provided value if available (for re-rigging),
     // otherwise read current position (for initial rigging)
     var childRestPos;
-    if (existingRestPos) {
-        childRestPos = existingRestPos;
-    } else if (splitDims) {
-        childRestPos = [
-            child.transform.xPosition.value,
-            child.transform.yPosition.value
-        ];
-        if (is3D) childRestPos.push(child.transform.zPosition.value);
-    } else {
-        childRestPos = child.transform.position.value;
+    try {
+        if (existingRestPos) {
+            childRestPos = existingRestPos;
+        } else if (splitDims && child.transform.xPosition) {
+            childRestPos = [
+                child.transform.xPosition.value,
+                child.transform.yPosition.value
+            ];
+            if (is3D && child.transform.zPosition) {
+                childRestPos.push(child.transform.zPosition.value);
+            }
+        } else {
+            childRestPos = child.transform.position.value;
+        }
+    } catch (restPosErr) {
+        // Fallback to standard position
+        try {
+            childRestPos = child.transform.position.value;
+        } catch (e2) {
+            childRestPos = [0, 0, 0];
+        }
     }
 
     // Common expression header - supports both pseudo effect and slider fallback
@@ -1721,84 +1904,92 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
     var usePseudoEffect = false;
     try {
         var parentEffects = parent.property("ADBE Effect Parade");
-        for (var pe = 1; pe <= parentEffects.numProperties; pe++) {
-            if (parentEffects.property(pe).matchName === "Pseudo/ParentRigParent") {
-                usePseudoEffect = true;
-                break;
+        if (parentEffects && parentEffects.numProperties > 0) {
+            for (var pe = 1; pe <= parentEffects.numProperties; pe++) {
+                var eff = parentEffects.property(pe);
+                if (eff && eff.matchName === "Pseudo/ParentRigParent") {
+                    usePseudoEffect = true;
+                    break;
+                }
             }
         }
     } catch (e) {}
 
-    var parentNameEscaped = parent.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    var header = [];
 
-    var header;
+    // Debug: verify parentNameEscaped is valid before building header
+    if (parentNameEscaped === null || parentNameEscaped === undefined) {
+        throw new Error("parentNameEscaped is null before header creation");
+    }
+
     if (usePseudoEffect) {
-        header = [
-            '// Parent Rig Expression (Pseudo Effect Mode)',
-            'var parentLayer = thisComp.layer("' + parentNameEscaped + '");',
-            'var pEff = parentLayer.effect("Parent Rig - Parent");',
-            '',
-            '// Child effect - access by name (set in addChildEffect)',
-            'var cEff = null;',
-            'try { cEff = thisLayer.effect("Parent Rig - Child"); } catch(e) {}',
-            '// Property index map for child pseudo effect (names may be empty due to localization)',
-            'var cpIdx = {',
-            '    "Index": 1, "Influence": 2,',
-            '    "Rest Pos X": 3, "Rest Pos Y": 4, "Rest Pos Z": 5,',
-            '    "Rest Scale X": 6, "Rest Scale Y": 7, "Rest Scale Z": 8,',
-            '    "Rest Rotation": 9, "Rest Opacity": 10,',
-            '    "Rest Anchor X": 11, "Rest Anchor Y": 12, "Rest Anchor Z": 13,',
-            '    "Parent Rest Pos X": 14, "Parent Rest Pos Y": 15, "Parent Rest Pos Z": 16,',
-            '    "Parent Rest Scale X": 17, "Parent Rest Scale Y": 18, "Parent Rest Scale Z": 19,',
-            '    "Parent Rest Rotation": 20, "Parent Rest Opacity": 21,',
-            '    "Parent Rest Anchor X": 22, "Parent Rest Anchor Y": 23, "Parent Rest Anchor Z": 24',
-            '};',
-            'function cp(name) {',
-            '    if (cEff && cpIdx[name]) { try { return cEff(cpIdx[name]).value; } catch(e) {} }',
-            '    try { return effect("PR_" + name)("Slider").value; } catch(e) {}',
-            '    return 0;',
-            '}',
-            '',
-            '// Get rig parameters from child effect',
-            'var myIndex = cp("Index") || 1;',
-            'var childInfluence = (cp("Influence") || 100) / 100;',
-            '',
-            '// Delay section (indices 3-6)',
-            'var delayProp = pEff(3);',
-            'var stretchProp = pEff(4);',
-            'var parentInfluenceProp = pEff(5);',
-            'var delayFalloffProp = pEff(6);',
-            '',
-            '// Order section (indices 13-15)',
-            'var orderByProp = pEff(13);',  // 1=Leader, 3-6=directional, 7-10=diagonal, 11-12=radial, 15=random
-            'var reverseOrderProp = pEff(14);',
-            'var randomSeed = pEff(15).value;',
-            '',
-            '// Leader layer section (indices 20-22)',
-            'var leaderIndexProp = pEff(20);',
-            'var delayBeforeLeaderProp = pEff(21);',
-            'var delayAfterLeaderProp = pEff(22);',
-            '',
-            '// Transform type popups (indices 27-28): 1=Child, 2=Parent, 3=Leader',
-            'var scaleAroundMode = 1; try { scaleAroundMode = pEff(27).value; } catch(e) {}',
-            'var rotateAroundMode = 1; try { rotateAroundMode = pEff(28).value; } catch(e) {}',
-            '// Convert to number to ensure proper comparison',
-            'scaleAroundMode = Number(scaleAroundMode) || 1;',
-            'rotateAroundMode = Number(rotateAroundMode) || 1;',
-            '',
-            '// Pinning section (indices 32-51)',
-            'var pinDirectionProp = pEff(32);',  // 1=Overscroll stretch, 2=Collision squish
-            'var pinInfluenceProp = pEff(33);',
-            'var pinStretchProp = pEff(34);',
-            'var pinTrimProp = pEff(35);',
-            'var pinTopEnabled = pEff(38).value;',
-            'var pinTopY = pEff(39).value;',
-            'var pinBottomEnabled = pEff(42).value;',
-            'var pinBottomY = pEff(43).value;',
-            'var pinLeftEnabled = pEff(46).value;',
-            'var pinLeftX = pEff(47).value;',
-            'var pinRightEnabled = pEff(50).value;',
-            'var pinRightX = pEff(51).value;',
+        header.push('// Parent Rig Expression (Pseudo Effect Mode)');
+        header.push('var parentLayer = thisComp.layer("' + parentNameEscaped + '");');
+        header.push('var pEff = parentLayer.effect("Parent Rig - Parent");');
+        header.push('');
+        header.push('// Child effect - access by name (set in addChildEffect)');
+        header.push('var cEff = null;');
+        header.push('try { cEff = thisLayer.effect("Parent Rig - Child"); } catch(e) {}');
+        header.push('// Property index map for child pseudo effect (names may be empty due to localization)');
+        header.push('var cpIdx = {');
+        header.push('    "Index": 1, "Influence": 2,');
+        header.push('    "Rest Pos X": 3, "Rest Pos Y": 4, "Rest Pos Z": 5,');
+        header.push('    "Rest Scale X": 6, "Rest Scale Y": 7, "Rest Scale Z": 8,');
+        header.push('    "Rest Rotation": 9, "Rest Opacity": 10,');
+        header.push('    "Rest Anchor X": 11, "Rest Anchor Y": 12, "Rest Anchor Z": 13,');
+        header.push('    "Parent Rest Pos X": 14, "Parent Rest Pos Y": 15, "Parent Rest Pos Z": 16,');
+        header.push('    "Parent Rest Scale X": 17, "Parent Rest Scale Y": 18, "Parent Rest Scale Z": 19,');
+        header.push('    "Parent Rest Rotation": 20, "Parent Rest Opacity": 21,');
+        header.push('    "Parent Rest Anchor X": 22, "Parent Rest Anchor Y": 23, "Parent Rest Anchor Z": 24');
+        header.push('};');
+        header.push('function cp(name) {');
+        header.push('    if (cEff && cpIdx[name]) { try { return cEff(cpIdx[name]).value; } catch(e) {} }');
+        header.push('    try { return effect("PR_" + name)("Slider").value; } catch(e) {}');
+        header.push('    return 0;');
+        header.push('}');
+        header.push('');
+        header.push('// Get rig parameters from child effect');
+        header.push('var myIndex = cp("Index") || 1;');
+        header.push('var childInfluence = (cp("Influence") || 100) / 100;');
+        header.push('');
+        header.push('// Delay section (indices 3-6)');
+        header.push('var delayProp = pEff(3);');
+        header.push('var stretchProp = pEff(4);');
+        header.push('var parentInfluenceProp = pEff(5);');
+        header.push('var delayFalloffProp = pEff(6);');
+        header.push('');
+        header.push('// Order section (indices 13-15)');
+        header.push('var orderByProp = pEff(13);');
+        header.push('var reverseOrderProp = pEff(14);');
+        header.push('var randomSeed = pEff(15).value;');
+        header.push('');
+        header.push('// Leader layer section (indices 20-22)');
+        header.push('var leaderIndexProp = pEff(20);');
+        header.push('var delayBeforeLeaderProp = pEff(21);');
+        header.push('var delayAfterLeaderProp = pEff(22);');
+        header.push('');
+        header.push('// Transform type popups (indices 27-28): 1=Child, 2=Parent, 3=Leader');
+        header.push('var scaleAroundMode = 1; try { scaleAroundMode = pEff(27).value; } catch(e) {}');
+        header.push('var rotateAroundMode = 1; try { rotateAroundMode = pEff(28).value; } catch(e) {}');
+        header.push('// Convert to number to ensure proper comparison');
+        header.push('scaleAroundMode = Number(scaleAroundMode) || 1;');
+        header.push('rotateAroundMode = Number(rotateAroundMode) || 1;');
+        header.push('');
+        header.push('// Pinning section (indices 32-51)');
+        header.push('var pinDirectionProp = pEff(32);');
+        header.push('var pinInfluenceProp = pEff(33);');
+        header.push('var pinStretchProp = pEff(34);');
+        header.push('var pinTrimProp = pEff(35);');
+        header.push('var pinTopEnabled = pEff(38).value;');
+        header.push('var pinTopY = pEff(39).value;');
+        header.push('var pinBottomEnabled = pEff(42).value;');
+        header.push('var pinBottomY = pEff(43).value;');
+        header.push('var pinLeftEnabled = pEff(46).value;');
+        header.push('var pinLeftX = pEff(47).value;');
+        header.push('var pinRightEnabled = pEff(50).value;');
+        header.push('var pinRightX = pEff(51).value;');
+        // Continue with rest of header (functions and bounds) as array concat
+        header = header.concat([
             '',
             '// Find leader layer by searching for the child with matching Index',
             'function findLeaderLayer() {',
@@ -2294,7 +2485,8 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    return 100 + (amount - 100) * influence;',
             '}',
             ''
-        ].join('\n');
+        ]);
+        header = header.join('\n');
     } else {
         header = [
             '// Parent Rig Expression (Slider Fallback Mode)',
@@ -3263,35 +3455,73 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'followAnchorPoint ? add(parentDrivenAnchor, childDelta) : childAnimAnchor;'
     ].join('\n');
 
-    // Apply expressions (errors will show in AE's expression error UI)
-    if (splitDims) {
-        // Split dimensions - apply separate X, Y, Z expressions
-        var xPosExpr = createSplitPosExpr(header, timeRemapFunc, 'X', 'xPosition', is3D);
-        var yPosExpr = createSplitPosExpr(header, timeRemapFunc, 'Y', 'yPosition', is3D);
+    // Apply expressions conditionally based on followOptions (for performance)
+    // Only apply expressions to properties that are enabled - no expression = native speed
 
-        try { child.transform.xPosition.expression = xPosExpr; } catch (e) {}
-        try { child.transform.yPosition.expression = yPosExpr; } catch (e) {}
+    // Position expression
+    if (followOptions.position) {
+        if (splitDims) {
+            // Split dimensions - apply separate X, Y, Z expressions
+            var xPosExpr = createSplitPosExpr(header, timeRemapFunc, 'X', 'xPosition', is3D);
+            var yPosExpr = createSplitPosExpr(header, timeRemapFunc, 'Y', 'yPosition', is3D);
 
-        if (is3D) {
-            var zPosExpr = createSplitPosExpr(header, timeRemapFunc, 'Z', 'zPosition', is3D);
-            try { child.transform.zPosition.expression = zPosExpr; } catch (e) {}
+            try { child.transform.xPosition.expression = xPosExpr; } catch (e) {}
+            try { child.transform.yPosition.expression = yPosExpr; } catch (e) {}
+
+            if (is3D) {
+                var zPosExpr = createSplitPosExpr(header, timeRemapFunc, 'Z', 'zPosition', is3D);
+                try { child.transform.zPosition.expression = zPosExpr; } catch (e) {}
+            }
+        } else {
+            // Normal position - single expression
+            try { child.transform.position.expression = posExpr; } catch (e) {}
         }
     } else {
-        // Normal position - single expression
-        try { child.transform.position.expression = posExpr; } catch (e) {}
+        // Remove any existing position expression
+        try { child.transform.position.expression = ""; } catch (e) {}
+        if (splitDims) {
+            try { child.transform.xPosition.expression = ""; } catch (e) {}
+            try { child.transform.yPosition.expression = ""; } catch (e) {}
+            if (is3D) { try { child.transform.zPosition.expression = ""; } catch (e) {} }
+        }
     }
 
-    try { child.transform.scale.expression = scaleExpr; } catch (e) {}
-    try { child.transform.rotation.expression = rotExpr; } catch (e) {}
-
-    // Apply X and Y rotation expressions for 3D layers
-    if (is3D) {
-        try { child.transform.xRotation.expression = xRotExpr; } catch (e) {}
-        try { child.transform.yRotation.expression = yRotExpr; } catch (e) {}
+    // Scale expression
+    if (followOptions.scale) {
+        try { child.transform.scale.expression = scaleExpr; } catch (e) {}
+    } else {
+        try { child.transform.scale.expression = ""; } catch (e) {}
     }
 
-    try { child.transform.opacity.expression = opacityExpr; } catch (e) {}
-    try { child.transform.anchorPoint.expression = anchorExpr; } catch (e) {}
+    // Rotation expression
+    if (followOptions.rotation) {
+        try { child.transform.rotation.expression = rotExpr; } catch (e) {}
+        // Apply X and Y rotation expressions for 3D layers
+        if (is3D) {
+            try { child.transform.xRotation.expression = xRotExpr; } catch (e) {}
+            try { child.transform.yRotation.expression = yRotExpr; } catch (e) {}
+        }
+    } else {
+        try { child.transform.rotation.expression = ""; } catch (e) {}
+        if (is3D) {
+            try { child.transform.xRotation.expression = ""; } catch (e) {}
+            try { child.transform.yRotation.expression = ""; } catch (e) {}
+        }
+    }
+
+    // Opacity expression
+    if (followOptions.opacity) {
+        try { child.transform.opacity.expression = opacityExpr; } catch (e) {}
+    } else {
+        try { child.transform.opacity.expression = ""; } catch (e) {}
+    }
+
+    // Anchor point expression
+    if (followOptions.anchor) {
+        try { child.transform.anchorPoint.expression = anchorExpr; } catch (e) {}
+    } else {
+        try { child.transform.anchorPoint.expression = ""; } catch (e) {}
+    }
 }
 
 // Helper function to create split dimension position expressions

@@ -7,8 +7,25 @@
 </head>
 <body>
     <div class="container">
+        <div class="options-section">
+            <div class="options-header">Children follow:</div>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="prPosition" checked> Position</label>
+                <label><input type="checkbox" id="prScale" checked> Scale</label>
+                <label><input type="checkbox" id="prRotation" checked> Rotation</label>
+                <label><input type="checkbox" id="prOpacity"> Opacity</label>
+                <label><input type="checkbox" id="prAnchor"> Anchor point</label>
+            </div>
+        </div>
         <button id="applyRig" class="main-button">Apply Parent Rig</button>
+        <button id="removeRig" class="secondary-button">Remove Parent Rig</button>
+
+        <div class="divider"></div>
+
         <button id="addChildRig" class="main-button">Add Child Rig</button>
+
+        <div class="divider"></div>
+
         <button id="addAffector" class="main-button">Add Affector</button>
 
         <div class="preset-buttons">

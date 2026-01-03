@@ -6,6 +6,7 @@ var extensionPath = csInterface.getSystemPath(SystemPath.EXTENSION);
 
 document.addEventListener('DOMContentLoaded', function() {
     var applyButton = document.getElementById('applyRig');
+    var removeButton = document.getElementById('removeRig');
     var childRigButton = document.getElementById('addChildRig');
     var affectorButton = document.getElementById('addAffector');
     var horizontalButton = document.getElementById('addHorizontal');
@@ -13,15 +14,28 @@ document.addEventListener('DOMContentLoaded', function() {
     var gridButton = document.getElementById('addGrid');
     var radialButton = document.getElementById('addRadial');
 
+    // Helper to get follow options from checkboxes
+    function getFollowOptions() {
+        return {
+            position: document.getElementById('prPosition').checked,
+            scale: document.getElementById('prScale').checked,
+            rotation: document.getElementById('prRotation').checked,
+            opacity: document.getElementById('prOpacity').checked,
+            anchor: document.getElementById('prAnchor').checked
+        };
+    }
+
     applyButton.addEventListener('click', function() {
         applyButton.classList.add('loading');
         applyButton.textContent = 'Applying...';
+
+        var optionsJSON = JSON.stringify(getFollowOptions());
 
         // Pass extension path to ExtendScript (no 'var' to update the global)
         var setPathScript = 'extensionRoot = "' + extensionPath.replace(/\\/g, '\\\\') + '";';
 
         csInterface.evalScript(setPathScript, function() {
-            csInterface.evalScript('applyParentRig()', function(result) {
+            csInterface.evalScript('applyParentRig(\'' + optionsJSON + '\')', function(result) {
                 applyButton.classList.remove('loading');
                 applyButton.textContent = 'Apply Parent Rig';
 
@@ -29,6 +43,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('Result:', result);
                 }
             });
+        });
+    });
+
+    removeButton.addEventListener('click', function() {
+        removeButton.classList.add('loading');
+        removeButton.textContent = 'Removing...';
+
+        csInterface.evalScript('removeParentRig()', function(result) {
+            removeButton.classList.remove('loading');
+            removeButton.textContent = 'Remove Parent Rig';
+
+            if (result && result !== 'undefined') {
+                console.log('Remove result:', result);
+            }
         });
     });
 
