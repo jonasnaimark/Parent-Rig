@@ -849,6 +849,74 @@ function findParentChildRelationships(selectedLayers, comp) {
 // UTILITY FUNCTIONS
 // ============================================
 
+// Calculate world position of a layer (accounting for entire parent chain)
+function getLayerWorldPosition(layer, time) {
+    // This function calculates what toWorld([0,0]) returns
+    // i.e., the world position of the layer's anchor point
+    //
+    // In AE, a layer's position property places its anchor point in the parent's
+    // coordinate system. The parent's coordinate system has its origin at the
+    // parent's anchor point. So child positions are ALREADY relative to parent's anchor.
+
+    var pos = layer.transform.position.valueAtTime(time, false);
+    var worldX = pos[0];
+    var worldY = pos[1];
+    var worldZ = pos.length > 2 ? pos[2] : 0;
+
+    // Walk up the parent chain, transforming the point through each parent's transform
+    var currentLayer = layer.parent;
+    while (currentLayer) {
+        var parentPos = currentLayer.transform.position.valueAtTime(time, false);
+        var parentScale = currentLayer.transform.scale.valueAtTime(time, false);
+        var parentRot = currentLayer.transform.rotation.valueAtTime(time, false);
+
+        // Apply parent's scale
+        var scaleX = parentScale[0] / 100;
+        var scaleY = parentScale[1] / 100;
+        worldX *= scaleX;
+        worldY *= scaleY;
+
+        // Apply parent's rotation
+        var rad = parentRot * Math.PI / 180;
+        var cosR = Math.cos(rad);
+        var sinR = Math.sin(rad);
+        var rotatedX = worldX * cosR - worldY * sinR;
+        var rotatedY = worldX * sinR + worldY * cosR;
+        worldX = rotatedX;
+        worldY = rotatedY;
+
+        // Add parent's position to get position in grandparent/comp space
+        worldX += parentPos[0];
+        worldY += parentPos[1];
+
+        currentLayer = currentLayer.parent;
+    }
+
+    return [worldX, worldY, worldZ];
+}
+
+function getLayerWorldScale(layer, time) {
+    // Calculate cumulative scale from entire parent chain
+    // Returns percentage values (100 = 100%)
+    var worldScaleX = 1;
+    var worldScaleY = 1;
+    var worldScaleZ = 1;
+
+    var currentLayer = layer;
+    while (currentLayer) {
+        var scale = currentLayer.transform.scale.valueAtTime(time, false);
+        worldScaleX *= scale[0] / 100;
+        worldScaleY *= scale[1] / 100;
+        if (scale.length > 2) {
+            worldScaleZ *= scale[2] / 100;
+        }
+        currentLayer = currentLayer.parent;
+    }
+
+    // Convert back to percentage (1 -> 100%)
+    return [worldScaleX * 100, worldScaleY * 100, worldScaleZ * 100];
+}
+
 function hasEffect(layer, effectName) {
     // Map display names to matchNames for pseudo effects (which may have empty display names)
     var matchNameMap = {
@@ -3666,6 +3734,7 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D) {
 // ============================================
 
 function addChildRig() {
+    try {
     var comp = app.project.activeItem;
     if (!comp || !(comp instanceof CompItem)) {
         alert("Please select a composition.");
@@ -3746,8 +3815,9 @@ function addChildRig() {
         var childRot = child.transform.rotation.value;
         var childOpacity = child.transform.opacity.value;
 
-        var parentPos = parent.transform.position.value;
-        var parentScale = parent.transform.scale.value;
+        // Get parent's WORLD position and scale (accounts for entire parent chain)
+        var parentPos = getLayerWorldPosition(parent, comp.time);
+        var parentScale = getLayerWorldScale(parent, comp.time);
         var parentRot = parent.transform.rotation.value;
         var parentOpacity = parent.transform.opacity.value;
 
@@ -3780,6 +3850,12 @@ function addChildRig() {
     }
 
     // Apply new Child Rigs
+    if (layersToRig.length === 0 && layersToRefresh.length === 0) {
+        alert("No layers to rig or refresh. Make sure selected layers are parented to another layer.");
+        app.endUndoGroup();
+        return;
+    }
+
     for (var i = 0; i < layersToRig.length; i++) {
         var child = layersToRig[i];
         var parent = child.parent;
@@ -3791,16 +3867,30 @@ function addChildRig() {
         var childRestOpacity = child.transform.opacity.value;
         var childRestAnchor = child.transform.anchorPoint.value;
 
-        var parentRestPos = parent.transform.position.value;
-        var parentRestScale = parent.transform.scale.value;
+        // Get parent's current values
+        // Use WORLD position to match what toWorld([0,0]) returns in the expression
+        var parentRestPos = getLayerWorldPosition(parent, comp.time);
+        var parentRestScale = getLayerWorldScale(parent, comp.time);
         var parentRestRot = parent.transform.rotation.value;
         var parentRestOpacity = parent.transform.opacity.value;
 
-        // Unparent the layer (this will change its world position)
+        // Unparent the layer (AE automatically converts position to world space)
+        // Note: AE does NOT change scale when unparenting - scale property stays the same
         child.parent = null;
 
-        // Get the world position after unparenting
-        var worldPos = child.transform.position.value;
+        // Get values after unparenting
+        // Handle separated position dimensions
+        var worldPos;
+        var posProp = child.transform.position;
+        if (posProp.dimensionsSeparated) {
+            worldPos = [
+                child.transform.xPosition.value,
+                child.transform.yPosition.value,
+                is3D ? child.transform.zPosition.value : 0
+            ];
+        } else {
+            worldPos = posProp.value;
+        }
         var worldScale = child.transform.scale.value;
         var worldAnchor = child.transform.anchorPoint.value;
 
@@ -3875,7 +3965,7 @@ function addChildRig() {
         eff(22).setValue(childRestOpacity);  // Rest Opacity
         // Anchor point rest values not set - anchor point is not tracked
 
-        eff(26).setValue(parentRestPos[0]);  // Parent Rest Pos X
+        eff(26).setValue(parentRestPos[0]);  // Parent Rest Pos X (world position)
         eff(27).setValue(parentRestPos[1]);  // Parent Rest Pos Y
         eff(28).setValue(is3D && parentRestPos.length > 2 ? parentRestPos[2] : 0);  // Parent Rest Pos Z
         eff(29).setValue(parentRestScale[0]);  // Parent Rest Scale X
@@ -3903,6 +3993,10 @@ function addChildRig() {
         msg += "Rest values refreshed on " + layersToRefresh.length + " layer(s)";
     }
     return msg || "No changes made";
+    } catch (e) {
+        alert("addChildRig error: " + e.message + " at line " + e.line);
+        app.endUndoGroup();
+    }
 }
 
 function applyChildRigExpressions(child, parentName, effectName, is3D) {
@@ -3959,18 +4053,19 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
         '// Get delayed time',
         'var t = Math.max(0, time - delaySecs);',
         '',
-        '// Get parent values at delayed time',
-        'var parentPos = parentLayer.transform.position.valueAtTime(t);',
+        '// Get parent WORLD position at delayed time (accounts for entire parent chain)',
+        '// IMPORTANT: toWorld([0,0]) gives world pos of anchor point, NOT toWorld(anchorPoint)',
+        'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
         'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
         'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
         '',
         '// Start with keyframed value',
         'var result = value.slice ? value.slice() : [value[0], value[1]' + (is3D ? ', value[2]' : '') + '];',
         '',
-        '// Position delta from parent movement',
-        'var posDeltaX = (parentPos[0] - parentRestPosX) * influencePosX;',
-        'var posDeltaY = (parentPos[1] - parentRestPosY) * influencePosY;',
-        (is3D ? 'var posDeltaZ = (parentPos[2] - parentRestPosZ) * influencePosZ;' : ''),
+        '// Position delta from parent world movement',
+        'var posDeltaX = (parentWorldPos[0] - parentRestPosX) * influencePosX;',
+        'var posDeltaY = (parentWorldPos[1] - parentRestPosY) * influencePosY;',
+        (is3D ? 'var posDeltaZ = (parentWorldPos[2] - parentRestPosZ) * influencePosZ;' : ''),
         'result[0] += posDeltaX;',
         'result[1] += posDeltaY;',
         (is3D ? 'result[2] += posDeltaZ;' : ''),
@@ -4005,16 +4100,41 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
     ].join('\n');
 
     // Scale expression - allows keyframing on top of parent following
+    // Uses world scale to account for entire parent chain
+    // Scale should be MULTIPLIED by the ratio, not added as delta
     var scaleExpr = header + [
         'var t = Math.max(0, time - delaySecs);',
-        'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-        '// Parent scale delta (how much parent changed from rest) * individual influence',
-        'var parentDeltaX = (parentScale[0] - parentRestScaleX) * influenceScale;',
-        'var parentDeltaY = (parentScale[1] - parentRestScaleY) * influenceScale;',
-        (is3D ? 'var parentDeltaZ = (parentScale[2] - parentRestScaleZ) * influenceScale;' : ''),
         '',
-        '// Start with keyframed value, add parent delta',
-        '[value[0] + parentDeltaX, value[1] + parentDeltaY' + (is3D ? ', value[2] + parentDeltaZ' : '') + '];'
+        '// Calculate world scale by walking up parent chain (including the layer itself)',
+        'function getWorldScale(layer, time) {',
+        '    var worldScaleX = 1;',
+        '    var worldScaleY = 1;',
+        '    var worldScaleZ = 1;',
+        '    var currentLayer = layer;',
+        '    while (currentLayer) {',
+        '        var s = currentLayer.transform.scale.valueAtTime(time);',
+        '        worldScaleX *= s[0] / 100;',
+        '        worldScaleY *= s[1] / 100;',
+        '        if (s.length > 2) worldScaleZ *= s[2] / 100;',
+        '        try { currentLayer = currentLayer.parent; } catch(e) { currentLayer = null; }',
+        '    }',
+        '    return [worldScaleX * 100, worldScaleY * 100, worldScaleZ * 100];',
+        '}',
+        '',
+        'var parentWorldScale = getWorldScale(parentLayer, t);',
+        '',
+        '// Calculate scale ratio (current world scale / rest world scale)',
+        'var scaleRatioX = parentWorldScale[0] / parentRestScaleX;',
+        'var scaleRatioY = parentWorldScale[1] / parentRestScaleY;',
+        (is3D ? 'var scaleRatioZ = parentWorldScale[2] / parentRestScaleZ;' : ''),
+        '',
+        '// Blend between no effect (ratio=1) and full effect based on influence',
+        'var blendedRatioX = 1 + (scaleRatioX - 1) * influenceScale;',
+        'var blendedRatioY = 1 + (scaleRatioY - 1) * influenceScale;',
+        (is3D ? 'var blendedRatioZ = 1 + (scaleRatioZ - 1) * influenceScale;' : ''),
+        '',
+        '// Apply scale ratio to keyframed value',
+        '[value[0] * blendedRatioX, value[1] * blendedRatioY' + (is3D ? ', value[2] * blendedRatioZ' : '') + '];'
     ].join('\n');
 
     // Rotation expression - allows keyframing on top of parent following
@@ -4036,7 +4156,85 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
     ].join('\n');
 
     // Apply expressions (anchor point intentionally not controlled - allows free repositioning after rigging)
-    try { child.transform.position.expression = posExpr; } catch (e) {}
+    // Check if position has separate dimensions enabled
+    var posProp = child.transform.position;
+    if (posProp.dimensionsSeparated) {
+        // Position is separated into X, Y, Z - apply to each
+        var xProp = child.transform.xPosition;
+        var yProp = child.transform.yPosition;
+
+        var posXExpr = header + [
+            'var t = Math.max(0, time - delaySecs);',
+            'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
+            'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
+            'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
+            '',
+            'var posDeltaX = (parentWorldPos[0] - parentRestPosX) * influencePosX;',
+            'var result = value + posDeltaX;',
+            '',
+            'if (scaleAroundMode === 1 && influenceScale > 0) {',
+            '    var scaleRatioX = parentScale[0] / parentRestScaleX;',
+            '    var offsetX = restPosX - parentRestPosX;',
+            '    var scaledOffsetX = offsetX * scaleRatioX;',
+            '    result += (scaledOffsetX - offsetX) * influenceScale;',
+            '}',
+            '',
+            'if (rotateAroundMode === 1 && influenceRotation > 0) {',
+            '    var rotDelta = (parentRot - parentRestRot) * influenceRotation;',
+            '    var rad = rotDelta * Math.PI / 180;',
+            '    var offsetX = restPosX - parentRestPosX;',
+            '    var offsetY = restPosY - parentRestPosY;',
+            '    var rotatedX = offsetX * Math.cos(rad) - offsetY * Math.sin(rad);',
+            '    result += rotatedX - offsetX;',
+            '}',
+            'result;'
+        ].join('\n');
+
+        var posYExpr = header + [
+            'var t = Math.max(0, time - delaySecs);',
+            'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
+            'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
+            'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
+            '',
+            'var posDeltaY = (parentWorldPos[1] - parentRestPosY) * influencePosY;',
+            'var result = value + posDeltaY;',
+            '',
+            'if (scaleAroundMode === 1 && influenceScale > 0) {',
+            '    var scaleRatioY = parentScale[1] / parentRestScaleY;',
+            '    var offsetY = restPosY - parentRestPosY;',
+            '    var scaledOffsetY = offsetY * scaleRatioY;',
+            '    result += (scaledOffsetY - offsetY) * influenceScale;',
+            '}',
+            '',
+            'if (rotateAroundMode === 1 && influenceRotation > 0) {',
+            '    var rotDelta = (parentRot - parentRestRot) * influenceRotation;',
+            '    var rad = rotDelta * Math.PI / 180;',
+            '    var offsetX = restPosX - parentRestPosX;',
+            '    var offsetY = restPosY - parentRestPosY;',
+            '    var rotatedY = offsetX * Math.sin(rad) + offsetY * Math.cos(rad);',
+            '    result += rotatedY - offsetY;',
+            '}',
+            'result;'
+        ].join('\n');
+
+        try { xProp.expression = posXExpr; } catch (e) {}
+        try { yProp.expression = posYExpr; } catch (e) {}
+
+        if (is3D) {
+            var zProp = child.transform.zPosition;
+            var posZExpr = header + [
+                'var t = Math.max(0, time - delaySecs);',
+                'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
+                'var posDeltaZ = (parentWorldPos[2] - parentRestPosZ) * influencePosZ;',
+                'value + posDeltaZ;'
+            ].join('\n');
+            try { zProp.expression = posZExpr; } catch (e) {}
+        }
+    } else {
+        // Standard combined position property
+        try { child.transform.position.expression = posExpr; } catch (e) {}
+    }
+
     try { child.transform.scale.expression = scaleExpr; } catch (e) {}
     try { child.transform.rotation.expression = rotExpr; } catch (e) {}
     try { child.transform.opacity.expression = opacityExpr; } catch (e) {}
