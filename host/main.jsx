@@ -371,7 +371,22 @@ function checkForAddToRig(selectedLayers, comp) {
 // Add new layers to an existing rig
 function addLayersToExistingRig(parent, newChildren, comp, followOptions) {
     var currentTime = comp.time;
+
+    // Check if ANY layer is 3D - if so, make them all 3D
     var is3D = parent.threeDLayer;
+    for (var nc = 0; nc < newChildren.length; nc++) {
+        if (newChildren[nc].threeDLayer) {
+            is3D = true;
+            break;
+        }
+    }
+    if (is3D) {
+        if (!parent.threeDLayer) parent.threeDLayer = true;
+        for (var nc = 0; nc < newChildren.length; nc++) {
+            if (!newChildren[nc].threeDLayer) newChildren[nc].threeDLayer = true;
+        }
+    }
+
     var parentSplitDims = parent.transform.position.dimensionsSeparated;
 
     var existingChildren = findRiggedChildren(parent, comp);
@@ -417,7 +432,7 @@ function addLayersToExistingRig(parent, newChildren, comp, followOptions) {
 
         var childLocalPos = child.transform.position.valueAtTime(currentTime, false);
         var childRestScale = child.transform.scale.valueAtTime(currentTime, false);
-        var childRestRot = child.transform.rotation.valueAtTime(currentTime, false);
+        var childRestRot = is3D ? child.transform.zRotation.valueAtTime(currentTime, false) : child.transform.rotation.valueAtTime(currentTime, false);
         var childRestXRot = is3D ? child.transform.xRotation.valueAtTime(currentTime, false) : 0;
         var childRestYRot = is3D ? child.transform.yRotation.valueAtTime(currentTime, false) : 0;
         var childRestOpacity = child.transform.opacity.valueAtTime(currentTime, false);
@@ -1073,7 +1088,23 @@ function rigParentChildGroup(parent, children, comp, followOptions) {
         parent.label = 13;
     }
 
+    // Check if ANY layer is 3D - if so, make them all 3D
     var is3D = originalParent.threeDLayer;
+    for (var c = 0; c < children.length; c++) {
+        if (children[c].threeDLayer) {
+            is3D = true;
+            break;
+        }
+    }
+
+    // Convert all layers to 3D if any are 3D
+    if (is3D) {
+        if (!originalParent.threeDLayer) originalParent.threeDLayer = true;
+        for (var c = 0; c < children.length; c++) {
+            if (!children[c].threeDLayer) children[c].threeDLayer = true;
+        }
+    }
+
     var parentSplitDims = originalParent.transform.position.dimensionsSeparated;
 
     // For rig layer, match the 3D and split dims settings
@@ -1113,7 +1144,7 @@ function rigParentChildGroup(parent, children, comp, followOptions) {
             parentRestPos = parent.transform.position.valueAtTime(currentTime, false);
         }
         parentRestScale = parent.transform.scale.valueAtTime(currentTime, false);
-        parentRestRot = parent.transform.rotation.valueAtTime(currentTime, false);
+        parentRestRot = is3D ? parent.transform.zRotation.valueAtTime(currentTime, false) : parent.transform.rotation.valueAtTime(currentTime, false);
         parentRestXRot = is3D ? parent.transform.xRotation.valueAtTime(currentTime, false) : 0;
         parentRestYRot = is3D ? parent.transform.yRotation.valueAtTime(currentTime, false) : 0;
         parentRestOpacity = parent.transform.opacity.valueAtTime(currentTime, false);
@@ -1158,7 +1189,7 @@ function rigParentChildGroup(parent, children, comp, followOptions) {
             childLocalPos = child.transform.position.valueAtTime(currentTime, false);
         }
         var childRestScale = child.transform.scale.valueAtTime(currentTime, false);
-        var childRestRot = child.transform.rotation.valueAtTime(currentTime, false);
+        var childRestRot = is3D ? child.transform.zRotation.valueAtTime(currentTime, false) : child.transform.rotation.valueAtTime(currentTime, false);
         var childRestXRot = is3D ? child.transform.xRotation.valueAtTime(currentTime, false) : 0;
         var childRestYRot = is3D ? child.transform.yRotation.valueAtTime(currentTime, false) : 0;
         var childRestOpacity = child.transform.opacity.valueAtTime(currentTime, false);
@@ -1665,6 +1696,19 @@ function addAffector() {
         affector.name = "Parent Rig Affector";
         affector.guideLayer = true;
 
+        // Check if any rigged layers are 3D - if so, make affector 3D too
+        var hasRigged3D = false;
+        for (var li = 1; li <= comp.numLayers; li++) {
+            var layer = comp.layer(li);
+            if (layer.threeDLayer && hasEffect(layer, "Parent Rig - Child")) {
+                hasRigged3D = true;
+                break;
+            }
+        }
+        if (hasRigged3D) {
+            affector.threeDLayer = true;
+        }
+
         var contents = affector.property("ADBE Root Vectors Group");
 
         // Outer ellipse group
@@ -1753,10 +1797,18 @@ function addAffector() {
         opacityCtrl.name = "Opacity";
         opacityCtrl.property("Slider").setValue(100);
 
-        // Rotation (degrees added to rotation)
-        var rotCtrl = effects.addProperty("ADBE Slider Control");
-        rotCtrl.name = "Rotation";
-        rotCtrl.property("Slider").setValue(0);
+        // Rotation offsets (degrees added to rotation)
+        var rotX = effects.addProperty("ADBE Slider Control");
+        rotX.name = "Rotation X";
+        rotX.property("Slider").setValue(0);
+
+        var rotY = effects.addProperty("ADBE Slider Control");
+        rotY.name = "Rotation Y";
+        rotY.property("Slider").setValue(0);
+
+        var rotZ = effects.addProperty("ADBE Slider Control");
+        rotZ.name = "Rotation Z";
+        rotZ.property("Slider").setValue(0);
 
         // Position offsets
         var posX = effects.addProperty("ADBE Slider Control");
@@ -2004,7 +2056,11 @@ function updateExistingRigsWithAffector(comp) {
                 followOptions.position = child.transform.position.expression && child.transform.position.expression.length > 0;
             }
             followOptions.scale = child.transform.scale.expression && child.transform.scale.expression.length > 0;
-            followOptions.rotation = child.transform.rotation.expression && child.transform.rotation.expression.length > 0;
+            if (is3D) {
+                followOptions.rotation = child.transform.zRotation.expression && child.transform.zRotation.expression.length > 0;
+            } else {
+                followOptions.rotation = child.transform.rotation.expression && child.transform.rotation.expression.length > 0;
+            }
             followOptions.opacity = child.transform.opacity.expression && child.transform.opacity.expression.length > 0;
             followOptions.anchor = child.transform.anchorPoint.expression && child.transform.anchorPoint.expression.length > 0;
         } catch (e) {}
@@ -2511,7 +2567,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var lineMode = getAffectorLineMode();',
             '    var dist;',
             '    if (lineMode) {',
-            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        var angle = (affector.threeDLayer ? affector.transform.zRotation.value : affector.transform.rotation.value) * Math.PI / 180;',
             '        // Distance along line direction (dot product with line direction)',
             '        dist = Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));',
             '    } else {',
@@ -2607,7 +2663,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    ',
             '    if (lineMode) {',
             '        // LINE MODE: spread along line direction only',
-            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        var angle = (affector.threeDLayer ? affector.transform.zRotation.value : affector.transform.rotation.value) * Math.PI / 180;',
             '        var cosA = Math.cos(angle);',
             '        var sinA = Math.sin(angle);',
             '        ',
@@ -2689,13 +2745,30 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    return 100 + (amount - 100) * influence;',
             '}',
             '',
-            'function getAffectorRotationBoost(pos) {',
+            'function getAffectorRotationXBoost(pos) {',
             '    if (!affector) return 0;',
-            '    // Rotation uses spatial influence only (no inertia) for consistent behavior',
             '    var influence = getAffectorInfluence(pos);',
             '    if (influence <= 0) return 0;',
             '    var amount = 0;',
-            '    try { amount = affector.effect("Rotation")("Slider").value; } catch(e) {}',
+            '    try { amount = affector.effect("Rotation X")("Slider").value; } catch(e) {}',
+            '    return amount * influence;',
+            '}',
+            '',
+            'function getAffectorRotationYBoost(pos) {',
+            '    if (!affector) return 0;',
+            '    var influence = getAffectorInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var amount = 0;',
+            '    try { amount = affector.effect("Rotation Y")("Slider").value; } catch(e) {}',
+            '    return amount * influence;',
+            '}',
+            '',
+            'function getAffectorRotationZBoost(pos) {',
+            '    if (!affector) return 0;',
+            '    var influence = getAffectorInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var amount = 0;',
+            '    try { amount = affector.effect("Rotation Z")("Slider").value; } catch(e) {}',
             '    return amount * influence;',
             '}',
             '',
@@ -2889,7 +2962,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var lineMode = getAffectorLineMode();',
             '    var dist;',
             '    if (lineMode) {',
-            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        var angle = (affector.threeDLayer ? affector.transform.zRotation.value : affector.transform.rotation.value) * Math.PI / 180;',
             '        // Distance along line direction (dot product with line direction)',
             '        dist = Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));',
             '    } else {',
@@ -2985,7 +3058,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    ',
             '    if (lineMode) {',
             '        // LINE MODE: spread along line direction only',
-            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        var angle = (affector.threeDLayer ? affector.transform.zRotation.value : affector.transform.rotation.value) * Math.PI / 180;',
             '        var cosA = Math.cos(angle);',
             '        var sinA = Math.sin(angle);',
             '        ',
@@ -3067,13 +3140,30 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    return 100 + (amount - 100) * influence;',
             '}',
             '',
-            'function getAffectorRotationBoost(pos) {',
+            'function getAffectorRotationXBoost(pos) {',
             '    if (!affector) return 0;',
-            '    // Rotation uses spatial influence only (no inertia) for consistent behavior',
             '    var influence = getAffectorInfluence(pos);',
             '    if (influence <= 0) return 0;',
             '    var amount = 0;',
-            '    try { amount = affector.effect("Rotation")("Slider").value; } catch(e) {}',
+            '    try { amount = affector.effect("Rotation X")("Slider").value; } catch(e) {}',
+            '    return amount * influence;',
+            '}',
+            '',
+            'function getAffectorRotationYBoost(pos) {',
+            '    if (!affector) return 0;',
+            '    var influence = getAffectorInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var amount = 0;',
+            '    try { amount = affector.effect("Rotation Y")("Slider").value; } catch(e) {}',
+            '    return amount * influence;',
+            '}',
+            '',
+            'function getAffectorRotationZBoost(pos) {',
+            '    if (!affector) return 0;',
+            '    var influence = getAffectorInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var amount = 0;',
+            '    try { amount = affector.effect("Rotation Z")("Slider").value; } catch(e) {}',
             '    return amount * influence;',
             '}',
             '',
@@ -3585,7 +3675,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '',
         '// Apply Affector rotation boost (based on current position)',
         'var currentPos = thisLayer.transform.position.value;',
-        'var rotBoost = getAffectorRotationBoost(currentPos);',
+        'var rotBoost = getAffectorRotationZBoost(currentPos);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         'var childAnimRot = value;',
@@ -3622,6 +3712,12 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '}',
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
+        '',
+        '// Apply Affector X rotation boost',
+        'var currentPos = thisLayer.transform.position.value;',
+        'var rotBoost = getAffectorRotationXBoost(currentPos);',
+        'parentDrivenRot = parentDrivenRot + rotBoost;',
+        '',
         'var childAnimRot = value;',
         'var childRotDelta = childAnimRot - restRot;',
         '',
@@ -3655,6 +3751,12 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '}',
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
+        '',
+        '// Apply Affector Y rotation boost',
+        'var currentPos = thisLayer.transform.position.value;',
+        'var rotBoost = getAffectorRotationYBoost(currentPos);',
+        'parentDrivenRot = parentDrivenRot + rotBoost;',
+        '',
         'var childAnimRot = value;',
         'var childRotDelta = childAnimRot - restRot;',
         '',
@@ -3767,17 +3869,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
 
     // Rotation expression
     if (followOptions.rotation) {
-        try { child.transform.rotation.expression = rotExpr; } catch (e) {}
-        // Apply X and Y rotation expressions for 3D layers
         if (is3D) {
+            try { child.transform.zRotation.expression = rotExpr; } catch (e) {}
             try { child.transform.xRotation.expression = xRotExpr; } catch (e) {}
             try { child.transform.yRotation.expression = yRotExpr; } catch (e) {}
+        } else {
+            try { child.transform.rotation.expression = rotExpr; } catch (e) {}
         }
     } else {
-        try { child.transform.rotation.expression = ""; } catch (e) {}
         if (is3D) {
+            try { child.transform.zRotation.expression = ""; } catch (e) {}
             try { child.transform.xRotation.expression = ""; } catch (e) {}
             try { child.transform.yRotation.expression = ""; } catch (e) {}
+        } else {
+            try { child.transform.rotation.expression = ""; } catch (e) {}
         }
     }
 
@@ -4261,7 +4366,7 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
         '// IMPORTANT: toWorld([0,0]) gives world pos of anchor point, NOT toWorld(anchorPoint)',
         'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
         'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-        'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
+        'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
         '',
         '// Start with keyframed value',
         'var result = value.slice ? value.slice() : [value[0], value[1]' + (is3D ? ', value[2]' : '') + '];',
@@ -4344,7 +4449,7 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
     // Rotation expression - allows keyframing on top of parent following
     var rotExpr = header + [
         'var t = Math.max(0, time - delaySecs);',
-        'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
+        'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
         'var parentDelta = (parentRot - parentRestRot) * influenceRotation;',
         '// Start with keyframed value, add parent delta',
         'value + parentDelta;'
@@ -4371,7 +4476,7 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
             'var t = Math.max(0, time - delaySecs);',
             'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
             'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-            'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
+            'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
             '',
             'var posDeltaX = (parentWorldPos[0] - parentRestPosX) * influencePosX;',
             'var result = value + posDeltaX;',
@@ -4398,7 +4503,7 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
             'var t = Math.max(0, time - delaySecs);',
             'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
             'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-            'var parentRot = parentLayer.transform.rotation.valueAtTime(t);',
+            'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
             '',
             'var posDeltaY = (parentWorldPos[1] - parentRestPosY) * influencePosY;',
             'var result = value + posDeltaY;',
@@ -4440,7 +4545,11 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
     }
 
     try { child.transform.scale.expression = scaleExpr; } catch (e) {}
-    try { child.transform.rotation.expression = rotExpr; } catch (e) {}
+    if (is3D) {
+        try { child.transform.zRotation.expression = rotExpr; } catch (e) {}
+    } else {
+        try { child.transform.rotation.expression = rotExpr; } catch (e) {}
+    }
     try { child.transform.opacity.expression = opacityExpr; } catch (e) {}
 }
 
