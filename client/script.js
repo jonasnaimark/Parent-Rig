@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var removeButton = document.getElementById('removeRig');
     var childRigButton = document.getElementById('addChildRig');
     var affectorButton = document.getElementById('addAffector');
+    var targetButton = document.getElementById('addTarget');
     var horizontalButton = document.getElementById('addHorizontal');
     var verticalButton = document.getElementById('addVertical');
     var gridButton = document.getElementById('addGrid');
@@ -86,6 +87,18 @@ document.addEventListener('DOMContentLoaded', function() {
             affectorButton.textContent = 'Add Affector';
             if (result && result !== 'undefined') {
                 console.log('Affector result:', result);
+            }
+        });
+    });
+
+    targetButton.addEventListener('click', function() {
+        targetButton.classList.add('loading');
+        targetButton.textContent = 'Adding...';
+        csInterface.evalScript('addTarget()', function(result) {
+            targetButton.classList.remove('loading');
+            targetButton.textContent = 'Add Target';
+            if (result && result !== 'undefined') {
+                console.log('Target result:', result);
             }
         });
     });

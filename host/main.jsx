@@ -1956,6 +1956,378 @@ function addAffector() {
     return "success";
 }
 
+// ============================================
+// TARGET
+// ============================================
+
+function addTarget() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return "error";
+    }
+
+    // Check if target already exists
+    for (var i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).name === "Parent Rig Target") {
+            alert("A target already exists in this composition.");
+            return "exists";
+        }
+    }
+
+    app.beginUndoGroup("Add Parent Rig Target");
+
+    try {
+        // Create shape layer
+        var target = comp.layers.addShape();
+        target.name = "Parent Rig Target";
+        target.guideLayer = true;
+
+        // Check if any rigged layers are 3D - if so, make target 3D too
+        var hasRigged3D = false;
+        for (var li = 1; li <= comp.numLayers; li++) {
+            var layer = comp.layer(li);
+            if (layer.threeDLayer && hasEffect(layer, "Parent Rig - Child")) {
+                hasRigged3D = true;
+                break;
+            }
+        }
+        if (hasRigged3D) {
+            target.threeDLayer = true;
+        }
+
+        var contents = target.property("ADBE Root Vectors Group");
+
+        // Colors: Repel = Magenta/Pink, Look At = Cyan/Blue
+        var repelOuterColor = [1, 0.2, 0.6, 1];      // Magenta
+        var repelInnerColor = [1, 0.5, 0.8, 1];      // Light magenta
+        var lookAtOuterColor = [0.2, 0.8, 1, 1];    // Cyan
+        var lookAtInnerColor = [0.5, 0.9, 1, 1];    // Light cyan
+
+        // === REPEL CIRCLES (Magenta, solid) ===
+        // Repel Outer ellipse group
+        var outerGroup = contents.addProperty("ADBE Vector Group");
+        outerGroup.name = "Repel Outer";
+        var outerVectors = outerGroup.property("ADBE Vectors Group");
+        var outerEllipse = outerVectors.addProperty("ADBE Vector Shape - Ellipse");
+        var outerSize = outerEllipse.property("ADBE Vector Ellipse Size");
+        outerSize.setValue([400, 400]);
+        var outerStroke = outerVectors.addProperty("ADBE Vector Graphic - Stroke");
+        outerStroke.property("ADBE Vector Stroke Color").setValue(repelOuterColor);
+        outerStroke.property("ADBE Vector Stroke Width").setValue(3);
+
+        // Repel Inner ellipse group
+        var innerGroup = contents.addProperty("ADBE Vector Group");
+        innerGroup.name = "Repel Inner";
+        var innerVectors = innerGroup.property("ADBE Vectors Group");
+        var innerEllipse = innerVectors.addProperty("ADBE Vector Shape - Ellipse");
+        var innerSize = innerEllipse.property("ADBE Vector Ellipse Size");
+        innerSize.setValue([100, 100]);
+        var innerStroke = innerVectors.addProperty("ADBE Vector Graphic - Stroke");
+        innerStroke.property("ADBE Vector Stroke Color").setValue(repelInnerColor);
+        innerStroke.property("ADBE Vector Stroke Width").setValue(2);
+
+        // === LOOK AT CIRCLES (Cyan, dashed) ===
+        // Look At Outer ellipse group
+        var lookAtOuterGroup = contents.addProperty("ADBE Vector Group");
+        lookAtOuterGroup.name = "Look At Outer";
+        var lookAtOuterVectors = lookAtOuterGroup.property("ADBE Vectors Group");
+        var lookAtOuterEllipse = lookAtOuterVectors.addProperty("ADBE Vector Shape - Ellipse");
+        var lookAtOuterSize = lookAtOuterEllipse.property("ADBE Vector Ellipse Size");
+        lookAtOuterSize.setValue([400, 400]);
+        var lookAtOuterStroke = lookAtOuterVectors.addProperty("ADBE Vector Graphic - Stroke");
+        lookAtOuterStroke.property("ADBE Vector Stroke Color").setValue(lookAtOuterColor);
+        lookAtOuterStroke.property("ADBE Vector Stroke Width").setValue(2);
+        lookAtOuterStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Dash 1").setValue(15);
+        lookAtOuterStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Gap 1").setValue(10);
+
+        // Look At Inner ellipse group
+        var lookAtInnerGroup = contents.addProperty("ADBE Vector Group");
+        lookAtInnerGroup.name = "Look At Inner";
+        var lookAtInnerVectors = lookAtInnerGroup.property("ADBE Vectors Group");
+        var lookAtInnerEllipse = lookAtInnerVectors.addProperty("ADBE Vector Shape - Ellipse");
+        var lookAtInnerSize = lookAtInnerEllipse.property("ADBE Vector Ellipse Size");
+        lookAtInnerSize.setValue([100, 100]);
+        var lookAtInnerStroke = lookAtInnerVectors.addProperty("ADBE Vector Graphic - Stroke");
+        lookAtInnerStroke.property("ADBE Vector Stroke Color").setValue(lookAtInnerColor);
+        lookAtInnerStroke.property("ADBE Vector Stroke Width").setValue(2);
+        lookAtInnerStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Dash 1").setValue(10);
+        lookAtInnerStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Gap 1").setValue(8);
+
+        // Crosshair - horizontal line
+        var hLineGroup = contents.addProperty("ADBE Vector Group");
+        hLineGroup.name = "H Line";
+        var hLineVectors = hLineGroup.property("ADBE Vectors Group");
+        var hLinePath = hLineVectors.addProperty("ADBE Vector Shape - Group");
+        var hLinePathProp = hLinePath.property("ADBE Vector Shape");
+        var hLineShape = new Shape();
+        hLineShape.vertices = [[-30, 0], [30, 0]];
+        hLineShape.closed = false;
+        hLinePathProp.setValue(hLineShape);
+        var hLineStroke = hLineVectors.addProperty("ADBE Vector Graphic - Stroke");
+        hLineStroke.property("ADBE Vector Stroke Color").setValue(repelOuterColor);
+        hLineStroke.property("ADBE Vector Stroke Width").setValue(2);
+
+        // Crosshair - vertical line
+        var vLineGroup = contents.addProperty("ADBE Vector Group");
+        vLineGroup.name = "V Line";
+        var vLineVectors = vLineGroup.property("ADBE Vectors Group");
+        var vLinePath = vLineVectors.addProperty("ADBE Vector Shape - Group");
+        var vLinePathProp = vLinePath.property("ADBE Vector Shape");
+        var vLineShape = new Shape();
+        vLineShape.vertices = [[0, -30], [0, 30]];
+        vLineShape.closed = false;
+        vLinePathProp.setValue(vLineShape);
+        var vLineStroke = vLineVectors.addProperty("ADBE Vector Graphic - Stroke");
+        vLineStroke.property("ADBE Vector Stroke Color").setValue(repelOuterColor);
+        vLineStroke.property("ADBE Vector Stroke Width").setValue(2);
+
+        // Position at top center of comp
+        target.transform.position.setValue([comp.width / 2, 0]);
+
+        // Add effects
+        var effects = target.property("ADBE Effect Parade");
+
+        // === LOOK AT SETTINGS ===
+        var lookAt = effects.addProperty("ADBE Checkbox Control");
+        lookAt.name = "Look At";
+        lookAt.property("Checkbox").setValue(1);
+
+        var rotCorrection = effects.addProperty("ADBE Angle Control");
+        rotCorrection.name = "Rotation Correction";
+        rotCorrection.property("Angle").setValue(0);
+
+        var strength = effects.addProperty("ADBE Slider Control");
+        strength.name = "Strength";
+        strength.property("Slider").setValue(100);
+
+        var lookAtOuterRadius = effects.addProperty("ADBE Slider Control");
+        lookAtOuterRadius.name = "Look At Outer Radius";
+        lookAtOuterRadius.property("Slider").setValue(200);
+
+        var lookAtInnerRadius = effects.addProperty("ADBE Slider Control");
+        lookAtInnerRadius.name = "Look At Inner Radius";
+        lookAtInnerRadius.property("Slider").setValue(0);
+
+        // Look At Falloff with keyframes (100 at frame 0, 0 at frame 60)
+        var lookAtFalloff = effects.addProperty("ADBE Slider Control");
+        lookAtFalloff.name = "Look At Falloff";
+        var lookAtFalloffSlider = lookAtFalloff.property("Slider");
+        lookAtFalloffSlider.setValueAtTime(0, 100);
+        lookAtFalloffSlider.setValueAtTime(60 * comp.frameDuration, 0);
+
+        // Delay Influence: 100 = current behavior (ignores delay), 0 = syncs with visual position
+        var delayInfluence = effects.addProperty("ADBE Slider Control");
+        delayInfluence.name = "Delay Influence";
+        delayInfluence.property("Slider").setValue(100);
+
+        // === REPEL SETTINGS ===
+        var repel = effects.addProperty("ADBE Checkbox Control");
+        repel.name = "Repel";
+        repel.property("Checkbox").setValue(1);
+
+        // Repel Falloff with keyframes (100 at frame 0, 0 at frame 60)
+        var repelFalloff = effects.addProperty("ADBE Slider Control");
+        repelFalloff.name = "Repel Falloff";
+        var repelFalloffSlider = repelFalloff.property("Slider");
+        repelFalloffSlider.setValueAtTime(0, 100);
+        repelFalloffSlider.setValueAtTime(60 * comp.frameDuration, 0);
+
+        var repelOuterRadius = effects.addProperty("ADBE Slider Control");
+        repelOuterRadius.name = "Repel Outer Radius";
+        repelOuterRadius.property("Slider").setValue(200);
+
+        var repelInnerRadius = effects.addProperty("ADBE Slider Control");
+        repelInnerRadius.name = "Repel Inner Radius";
+        repelInnerRadius.property("Slider").setValue(0);
+
+        var force = effects.addProperty("ADBE Slider Control");
+        force.name = "Force";
+        force.property("Slider").setValue(100);
+
+        // Find parent layer to position target just above it in timeline
+        var parentLayer = null;
+        for (var i = 1; i <= comp.numLayers; i++) {
+            var layer = comp.layer(i);
+            if (layer.name === target.name) continue;
+            if (layer.name === "Carousel Parent" || layer.name === "List Parent" || layer.name === "Grid Parent" ||
+                hasEffect(layer, "Parent Rig - Parent") || hasEffect(layer, "PR_Delay")) {
+                parentLayer = layer;
+                break;
+            }
+        }
+
+        if (parentLayer) {
+            target.moveBefore(parentLayer);
+        } else {
+            target.moveToBeginning();
+        }
+
+        // Link Repel ellipse sizes to Repel radius controls (magenta solid circles)
+        var repelOuterSizeExpr = target.property("ADBE Root Vectors Group").property("Repel Outer").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
+        var repelInnerSizeExpr = target.property("ADBE Root Vectors Group").property("Repel Inner").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
+        repelOuterSizeExpr.expression = 'var r = effect("Repel Outer Radius")("Slider"); [r*2, r*2];';
+        repelInnerSizeExpr.expression = 'var r = effect("Repel Inner Radius")("Slider"); [r*2, r*2];';
+
+        // Link Look At ellipse sizes to Look At radius controls (cyan dashed circles)
+        var lookAtOuterSizeExpr = target.property("ADBE Root Vectors Group").property("Look At Outer").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
+        var lookAtInnerSizeExpr = target.property("ADBE Root Vectors Group").property("Look At Inner").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
+        lookAtOuterSizeExpr.expression = 'var r = effect("Look At Outer Radius")("Slider"); [r*2, r*2];';
+        lookAtInnerSizeExpr.expression = 'var r = effect("Look At Inner Radius")("Slider"); [r*2, r*2];';
+
+        // Set outer radius to half of the smaller comp dimension for both Look At and Repel
+        var targetSize = Math.min(comp.width, comp.height) / 2;
+        target.effect("Look At Outer Radius")("Slider").setValue(targetSize);
+        target.effect("Repel Outer Radius")("Slider").setValue(targetSize);
+
+        // Update existing rigged children to include target code
+        updateExistingRigsWithTarget(comp);
+
+    } catch (e) {
+        alert("Error creating target: " + e.toString());
+        app.endUndoGroup();
+        return "error";
+    }
+
+    app.endUndoGroup();
+    return "success";
+}
+
+// Re-apply expressions to existing rigged children so they include target code
+function updateExistingRigsWithTarget(comp) {
+    // Find parent layer (has Parent Rig - Parent effect)
+    var parent = null;
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var layer = comp.layer(i);
+        if (hasEffect(layer, "Parent Rig - Parent") || hasEffect(layer, "PR_Delay")) {
+            parent = layer;
+            break;
+        }
+    }
+
+    if (!parent) return; // No rig found
+
+    // Ensure parent effect has correct name for expression access
+    try {
+        var parentEffects = parent.property("ADBE Effect Parade");
+        for (var pe = 1; pe <= parentEffects.numProperties; pe++) {
+            var eff = parentEffects.property(pe);
+            if (eff.matchName === "Pseudo/ParentRigParent") {
+                eff.name = "Parent Rig - Parent";
+                break;
+            }
+        }
+    } catch (e) {}
+
+    // Find all children (have Parent Rig - Child effect) and ensure effect names are correct
+    var children = [];
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var layer = comp.layer(i);
+        if (layer.index !== parent.index && hasEffect(layer, "Parent Rig - Child")) {
+            // Ensure child effect has correct name for expression access
+            try {
+                var layerEffects = layer.property("ADBE Effect Parade");
+                for (var ce = 1; ce <= layerEffects.numProperties; ce++) {
+                    var eff = layerEffects.property(ce);
+                    if (eff.matchName === "Pseudo/ParentRigChild") {
+                        eff.name = "Parent Rig - Child";
+                        break;
+                    }
+                }
+            } catch (e) {}
+            children.push(layer);
+        }
+    }
+
+    if (children.length === 0) return;
+
+    // Calculate group bounds from children's rest positions
+    var groupBounds = {
+        minX: Infinity, maxX: -Infinity,
+        minY: Infinity, maxY: -Infinity,
+        centerX: 0, centerY: 0
+    };
+
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        var restX = 0, restY = 0;
+
+        // Get rest position from child effect
+        try {
+            var childEff = child.effect("Parent Rig - Child");
+            if (childEff) {
+                restX = childEff.property(3).value; // Rest Pos X
+                restY = childEff.property(4).value; // Rest Pos Y
+            }
+        } catch (e) {}
+
+        if (restX < groupBounds.minX) groupBounds.minX = restX;
+        if (restX > groupBounds.maxX) groupBounds.maxX = restX;
+        if (restY < groupBounds.minY) groupBounds.minY = restY;
+        if (restY > groupBounds.maxY) groupBounds.maxY = restY;
+    }
+
+    groupBounds.centerX = (groupBounds.minX + groupBounds.maxX) / 2;
+    groupBounds.centerY = (groupBounds.minY + groupBounds.maxY) / 2;
+
+    // Re-apply expressions to each child, using stored rest positions
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        var is3D = child.threeDLayer;
+        var splitDims = false;
+
+        // Check for split dimensions
+        try {
+            var xPos = child.property("ADBE Transform Group").property("ADBE Position_0");
+            splitDims = (xPos !== null && xPos.canSetExpression);
+        } catch (e) {}
+
+        // Get child rest position from stored effect values (NOT current position)
+        var childRestPos;
+        try {
+            var childEff = child.effect("Parent Rig - Child");
+            if (childEff) {
+                childRestPos = [
+                    childEff.property(3).value,  // Rest Pos X
+                    childEff.property(4).value   // Rest Pos Y
+                ];
+                if (is3D) childRestPos.push(childEff.property(5).value);  // Rest Pos Z
+            }
+        } catch (e) {
+            childRestPos = [0, 0];
+        }
+
+        // Detect which properties currently have expressions (preserve user's follow options)
+        var followOptions = {
+            position: false,
+            scale: false,
+            rotation: false,
+            opacity: false,
+            anchor: false
+        };
+        try {
+            // Check if position has expression (handle split dimensions)
+            if (splitDims) {
+                var xPos = child.property("ADBE Transform Group").property("ADBE Position_0");
+                followOptions.position = xPos && xPos.expression && xPos.expression.length > 0;
+            } else {
+                followOptions.position = child.transform.position.expression && child.transform.position.expression.length > 0;
+            }
+            followOptions.scale = child.transform.scale.expression && child.transform.scale.expression.length > 0;
+            if (is3D) {
+                followOptions.rotation = child.transform.zRotation.expression && child.transform.zRotation.expression.length > 0;
+            } else {
+                followOptions.rotation = child.transform.rotation.expression && child.transform.rotation.expression.length > 0;
+            }
+            followOptions.opacity = child.transform.opacity.expression && child.transform.opacity.expression.length > 0;
+            followOptions.anchor = child.transform.anchorPoint.expression && child.transform.anchorPoint.expression.length > 0;
+        } catch (e) {}
+
+        // Re-apply expressions with stored rest position, preserving original follow options
+        applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, childRestPos, followOptions);
+    }
+}
+
 // Re-apply expressions to existing rigged children so they include affector code
 function updateExistingRigsWithAffector(comp) {
     // Find parent layer (has Parent Rig - Parent effect)
@@ -2936,6 +3308,97 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    }',
             '    return 100 + total;',
             '}',
+            '',
+            '// ===== TARGET SYSTEM =====',
+            'var target = null;',
+            'try { target = thisComp.layer("Parent Rig Target"); } catch(e) {}',
+            '',
+            'function calcLookAtInfluence(pos) {',
+            '    if (!target) return 0;',
+            '    var outerR = 200;',
+            '    var innerR = 0;',
+            '    try { outerR = target.effect("Look At Outer Radius")("Slider").value; } catch(e) {}',
+            '    try { innerR = target.effect("Look At Inner Radius")("Slider").value; } catch(e) {}',
+            '    if (outerR <= 0) return 0;',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = pos[0] - targetPos[0];',
+            '    var dy = pos[1] - targetPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist <= innerR) return 1;',
+            '    if (dist >= outerR) return 0;',
+            '    var falloffRange = outerR - innerR;',
+            '    var normalizedDist = (dist - innerR) / falloffRange;',
+            '    try {',
+            '        var falloffProp = target.effect("Look At Falloff")("Slider");',
+            '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+            '        return falloffVal / 100;',
+            '    } catch(e) { return 1 - normalizedDist; }',
+            '}',
+            '',
+            'function calcRepelInfluence(pos) {',
+            '    if (!target) return 0;',
+            '    var outerR = 200;',
+            '    var innerR = 0;',
+            '    try { outerR = target.effect("Repel Outer Radius")("Slider").value; } catch(e) {}',
+            '    try { innerR = target.effect("Repel Inner Radius")("Slider").value; } catch(e) {}',
+            '    if (outerR <= 0) return 0;',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = pos[0] - targetPos[0];',
+            '    var dy = pos[1] - targetPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist <= innerR) return 1;',
+            '    if (dist >= outerR) return 0;',
+            '    var falloffRange = outerR - innerR;',
+            '    var normalizedDist = (dist - innerR) / falloffRange;',
+            '    try {',
+            '        var falloffProp = target.effect("Repel Falloff")("Slider");',
+            '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+            '        return falloffVal / 100;',
+            '    } catch(e) { return 1 - normalizedDist; }',
+            '}',
+            '',
+            'function getTargetLookAtRotation(pos, currentRot) {',
+            '    if (!target) return currentRot;',
+            '    var lookAtEnabled = 0;',
+            '    try { lookAtEnabled = target.effect("Look At")("Checkbox").value; } catch(e) {}',
+            '    if (!lookAtEnabled) return currentRot;',
+            '    var influence = calcLookAtInfluence(pos);',
+            '    if (influence <= 0) return currentRot;',
+            '    var strength = 100;',
+            '    try { strength = target.effect("Strength")("Slider").value; } catch(e) {}',
+            '    if (strength === 0) return currentRot;',
+            '    var rotCorrection = 0;',
+            '    try { rotCorrection = target.effect("Rotation Correction")("Angle").value; } catch(e) {}',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = targetPos[0] - pos[0];',
+            '    var dy = targetPos[1] - pos[1];',
+            '    var angleToTarget = Math.atan2(dy, dx) * 180 / Math.PI + rotCorrection;',
+            '    // Full look-at angle based on strength',
+            '    var lookAtAngle = angleToTarget * (strength / 100);',
+            '    // Blend from rest rotation (0) to look-at angle based on influence',
+            '    // At influence=1: full look-at, at influence=0: rest rotation',
+            '    return lookAtAngle * influence;',
+            '}',
+            '',
+            'function getTargetRepelOffset(pos) {',
+            '    if (!target) return [0, 0];',
+            '    var repelEnabled = 0;',
+            '    try { repelEnabled = target.effect("Repel")("Checkbox").value; } catch(e) {}',
+            '    if (!repelEnabled) return [0, 0];',
+            '    var influence = calcRepelInfluence(pos);',
+            '    if (influence <= 0) return [0, 0];',
+            '    var force = 100;',
+            '    try { force = target.effect("Force")("Slider").value; } catch(e) {}',
+            '    if (force === 0) return [0, 0];',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = pos[0] - targetPos[0];',
+            '    var dy = pos[1] - targetPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist === 0) return [0, 0];',
+            '    // Normalize direction and apply force * influence',
+            '    var pushAmount = force * influence;',
+            '    return [(dx / dist) * pushAmount, (dy / dist) * pushAmount];',
+            '}',
             ''
         ]);
         header = header.join('\n');
@@ -3465,6 +3928,93 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    }',
             '    return 100 + total;',
             '}',
+            '',
+            '// ===== TARGET SYSTEM =====',
+            'var target = null;',
+            'try { target = thisComp.layer("Parent Rig Target"); } catch(e) {}',
+            '',
+            'function calcLookAtInfluence(pos) {',
+            '    if (!target) return 0;',
+            '    var outerR = 200;',
+            '    var innerR = 0;',
+            '    try { outerR = target.effect("Look At Outer Radius")("Slider").value; } catch(e) {}',
+            '    try { innerR = target.effect("Look At Inner Radius")("Slider").value; } catch(e) {}',
+            '    if (outerR <= 0) return 0;',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = pos[0] - targetPos[0];',
+            '    var dy = pos[1] - targetPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist <= innerR) return 1;',
+            '    if (dist >= outerR) return 0;',
+            '    var falloffRange = outerR - innerR;',
+            '    var normalizedDist = (dist - innerR) / falloffRange;',
+            '    try {',
+            '        var falloffProp = target.effect("Look At Falloff")("Slider");',
+            '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+            '        return falloffVal / 100;',
+            '    } catch(e) { return 1 - normalizedDist; }',
+            '}',
+            '',
+            'function calcRepelInfluence(pos) {',
+            '    if (!target) return 0;',
+            '    var outerR = 200;',
+            '    var innerR = 0;',
+            '    try { outerR = target.effect("Repel Outer Radius")("Slider").value; } catch(e) {}',
+            '    try { innerR = target.effect("Repel Inner Radius")("Slider").value; } catch(e) {}',
+            '    if (outerR <= 0) return 0;',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = pos[0] - targetPos[0];',
+            '    var dy = pos[1] - targetPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist <= innerR) return 1;',
+            '    if (dist >= outerR) return 0;',
+            '    var falloffRange = outerR - innerR;',
+            '    var normalizedDist = (dist - innerR) / falloffRange;',
+            '    try {',
+            '        var falloffProp = target.effect("Repel Falloff")("Slider");',
+            '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+            '        return falloffVal / 100;',
+            '    } catch(e) { return 1 - normalizedDist; }',
+            '}',
+            '',
+            'function getTargetLookAtRotation(pos) {',
+            '    if (!target) return 0;',
+            '    var lookAtEnabled = 0;',
+            '    try { lookAtEnabled = target.effect("Look At")("Checkbox").value; } catch(e) {}',
+            '    if (!lookAtEnabled) return 0;',
+            '    var influence = calcLookAtInfluence(pos);',
+            '    if (influence <= 0) return 0;',
+            '    var strength = 100;',
+            '    try { strength = target.effect("Strength")("Slider").value; } catch(e) {}',
+            '    if (strength === 0) return 0;',
+            '    var rotCorrection = 0;',
+            '    try { rotCorrection = target.effect("Rotation Correction")("Angle").value; } catch(e) {}',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = targetPos[0] - pos[0];',
+            '    var dy = targetPos[1] - pos[1];',
+            '    var angleToTarget = Math.atan2(dy, dx) * 180 / Math.PI;',
+            '    var finalAngle = angleToTarget + rotCorrection;',
+            '    return finalAngle * (strength / 100) * influence;',
+            '}',
+            '',
+            'function getTargetRepelOffset(pos) {',
+            '    if (!target) return [0, 0];',
+            '    var repelEnabled = 0;',
+            '    try { repelEnabled = target.effect("Repel")("Checkbox").value; } catch(e) {}',
+            '    if (!repelEnabled) return [0, 0];',
+            '    var influence = calcRepelInfluence(pos);',
+            '    if (influence <= 0) return [0, 0];',
+            '    var force = 100;',
+            '    try { force = target.effect("Force")("Slider").value; } catch(e) {}',
+            '    if (force === 0) return [0, 0];',
+            '    var targetPos = target.transform.position.value;',
+            '    var dx = pos[0] - targetPos[0];',
+            '    var dy = pos[1] - targetPos[1];',
+            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    if (dist === 0) return [0, 0];',
+            '    var pushAmount = force * influence;',
+            '    return [(dx / dist) * pushAmount, (dy / dist) * pushAmount];',
+            '}',
             ''
         ].join('\n');
     }
@@ -3882,6 +4432,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var affectorPosOffset = getAffectorPositionOffset(parentedPos);',
         'parentedPos = [parentedPos[0] + affectorSpread[0] + affectorPosOffset[0], parentedPos[1] + affectorSpread[1] + affectorPosOffset[1]' + (is3D ? ', parentedPos[2] + affectorPosOffset[2]' : '') + '];',
         '',
+        '// Apply Target repel offset',
+        'var targetRepel = getTargetRepelOffset(parentedPos);',
+        'parentedPos = [parentedPos[0] + targetRepel[0], parentedPos[1] + targetRepel[1]' + (is3D ? ', parentedPos[2]' : '') + '];',
+        '',
         'var childAnimPos = value;',
         'var childDelta = sub(childAnimPos, restPos);',
         '',
@@ -3966,6 +4520,38 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var currentPos = thisLayer.transform.position.value;',
         'var rotBoost = getAffectorRotationZBoost(currentPos);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
+        '',
+        '// Calculate parented position for look-at (rest + parent delta, with delay influence)',
+        'var restPosX = cp("Rest Pos X");',
+        'var restPosY = cp("Rest Pos Y");',
+        'var parentRestPosX = cp("Parent Rest Pos X");',
+        'var parentRestPosY = cp("Parent Rest Pos Y");',
+        'var parentPosNow = parentLayer.transform.position.value;',
+        '',
+        '// Get delay influence from target (100 = use current parent pos, 0 = use delayed parent pos)',
+        'var targetDelayInf = 100;',
+        'try {',
+        '    var tgt = thisComp.layer("Parent Rig Target");',
+        '    if (tgt) targetDelayInf = tgt.effect("Delay Influence")("Slider").value;',
+        '} catch(e) {}',
+        '',
+        '// Calculate delayed parent position using time remapping',
+        'var parentPosProp = parentLayer.transform.position;',
+        'var posRemapInfo = getRemapInfo(time, parentPosProp);',
+        'var parentPosDelayed = parentPosProp.valueAtTime(posRemapInfo.t1);',
+        '',
+        '// Blend between current and delayed parent position based on delay influence',
+        'var delayBlend = targetDelayInf / 100;',
+        'var parentPosBlended = [',
+        '    parentPosDelayed[0] + (parentPosNow[0] - parentPosDelayed[0]) * delayBlend,',
+        '    parentPosDelayed[1] + (parentPosNow[1] - parentPosDelayed[1]) * delayBlend',
+        '];',
+        '',
+        'var lookAtPos = [',
+        '    restPosX + (parentPosBlended[0] - parentRestPosX),',
+        '    restPosY + (parentPosBlended[1] - parentRestPosY)',
+        '];',
+        'parentDrivenRot = getTargetLookAtRotation(lookAtPos, parentDrivenRot);',
         '',
         'var childAnimRot = value;',
         'var childRotDelta = childAnimRot - restRot;',
