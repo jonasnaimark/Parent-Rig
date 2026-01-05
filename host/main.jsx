@@ -1689,6 +1689,28 @@ function addAffector() {
         innerStroke.property("ADBE Vector Stroke Color").setValue([1, 0.7, 0.3, 1]); // Lighter orange
         innerStroke.property("ADBE Vector Stroke Width").setValue(2);
 
+        // Outer Line rectangle group (for Line Mode)
+        var outerLineGroup = contents.addProperty("ADBE Vector Group");
+        outerLineGroup.name = "Outer Line";
+        var outerLineVectors = outerLineGroup.property("ADBE Vectors Group");
+        var outerLineRect = outerLineVectors.addProperty("ADBE Vector Shape - Rect");
+        var outerLineSize = outerLineRect.property("ADBE Vector Rect Size");
+        outerLineSize.setValue([400, 5000]);
+        var outerLineStroke = outerLineVectors.addProperty("ADBE Vector Graphic - Stroke");
+        outerLineStroke.property("ADBE Vector Stroke Color").setValue([1, 0.5, 0, 1]); // Orange
+        outerLineStroke.property("ADBE Vector Stroke Width").setValue(3);
+
+        // Inner Line rectangle group (for Line Mode)
+        var innerLineGroup = contents.addProperty("ADBE Vector Group");
+        innerLineGroup.name = "Inner Line";
+        var innerLineVectors = innerLineGroup.property("ADBE Vectors Group");
+        var innerLineRect = innerLineVectors.addProperty("ADBE Vector Shape - Rect");
+        var innerLineSize = innerLineRect.property("ADBE Vector Rect Size");
+        innerLineSize.setValue([100, 5000]);
+        var innerLineStroke = innerLineVectors.addProperty("ADBE Vector Graphic - Stroke");
+        innerLineStroke.property("ADBE Vector Stroke Color").setValue([1, 0.7, 0.3, 1]); // Lighter orange
+        innerLineStroke.property("ADBE Vector Stroke Width").setValue(2);
+
         // Position at center of comp
         affector.transform.position.setValue([comp.width / 2, comp.height / 2]);
 
@@ -1706,6 +1728,11 @@ function addAffector() {
         var falloffSlider = falloff.property("Slider");
         falloffSlider.setValueAtTime(0, 100);
         falloffSlider.setValueAtTime(60 * comp.frameDuration, 0);
+
+        // Line Mode checkbox (uses layer rotation for angle)
+        var lineMode = effects.addProperty("ADBE Checkbox Control");
+        lineMode.name = "Line Mode";
+        lineMode.property("Checkbox").setValue(0);
 
         // Radius controls
         var outerRadius = effects.addProperty("ADBE Slider Control");
@@ -1827,11 +1854,17 @@ function addAffector() {
             affector.moveToBeginning();
         }
 
-        // Link ellipse sizes to sliders via expressions (access fresh references)
+        // Link ellipse sizes (size 0 when in line mode to not affect bounds)
         var outerSizeExpr = affector.property("ADBE Root Vectors Group").property("Outer").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
         var innerSizeExpr = affector.property("ADBE Root Vectors Group").property("Inner").property("ADBE Vectors Group").property("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size");
-        outerSizeExpr.expression = 'var r = effect("Outer Radius")("Slider"); [r*2, r*2];';
-        innerSizeExpr.expression = 'var r = effect("Inner Radius")("Slider"); [r*2, r*2];';
+        outerSizeExpr.expression = 'var r = effect("Outer Radius")("Slider"); var lineMode = effect("Line Mode")("Checkbox").value; if (lineMode == 1) { [0, 0]; } else { [r*2, r*2]; }';
+        innerSizeExpr.expression = 'var r = effect("Inner Radius")("Slider"); var lineMode = effect("Line Mode")("Checkbox").value; if (lineMode == 1) { [0, 0]; } else { [r*2, r*2]; }';
+
+        // Link rectangle sizes for Line Mode (size 0 when hidden to not affect bounds)
+        var outerLineSizeExpr = affector.property("ADBE Root Vectors Group").property("Outer Line").property("ADBE Vectors Group").property("ADBE Vector Shape - Rect").property("ADBE Vector Rect Size");
+        var innerLineSizeExpr = affector.property("ADBE Root Vectors Group").property("Inner Line").property("ADBE Vectors Group").property("ADBE Vector Shape - Rect").property("ADBE Vector Rect Size");
+        outerLineSizeExpr.expression = 'var r = effect("Outer Radius")("Slider"); var lineMode = effect("Line Mode")("Checkbox").value; if (lineMode == 1) { [r*2, 5000]; } else { [0, 0]; }';
+        innerLineSizeExpr.expression = 'var r = effect("Inner Radius")("Slider"); var lineMode = effect("Line Mode")("Checkbox").value; if (lineMode == 1) { [r*2, 5000]; } else { [0, 0]; }';
 
         // Set outer radius to half of the smaller comp dimension (access fresh reference)
         var affectorSize = Math.min(comp.width, comp.height) / 2;
@@ -2458,6 +2491,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    try { return affector.effect("Influence")("Slider").value; } catch(e) { return 100; }',
             '}',
             '',
+            'function getAffectorLineMode() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Line Mode")("Checkbox").value; } catch(e) { return 0; }',
+            '}',
+            '',
             'function getAffectorInfluence(pos) {',
             '    if (!affector) return 0;',
             '    var globalInf = getGlobalInfluence() / 100;',
@@ -2468,7 +2506,18 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    if (outerR <= 0) return 0;',
             '    var dx = pos[0] - affectorPos[0];',
             '    var dy = pos[1] - affectorPos[1];',
-            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    ',
+            '    // Line mode: use distance along line direction (perpendicular axis is infinite)',
+            '    var lineMode = getAffectorLineMode();',
+            '    var dist;',
+            '    if (lineMode) {',
+            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        // Distance along line direction (dot product with line direction)',
+            '        dist = Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));',
+            '    } else {',
+            '        dist = Math.sqrt(dx * dx + dy * dy);',
+            '    }',
+            '    ',
             '    if (dist <= innerR) return globalInf;',
             '    if (dist >= outerR) return 0;',
             '    var falloffRange = outerR - innerR;',
@@ -2534,6 +2583,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var globalGap = getGlobalGap();',
             '    var outerR = getAffectorOuterRadius();',
             '    var innerR = getAffectorInnerRadius();',
+            '    var lineMode = getAffectorLineMode();',
             '    if (itemSize <= 0) itemSize = 100;',
             '    ',
             '    // Effective radius for falloff (outer - inner)',
@@ -2544,45 +2594,69 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var dx = parentedPos[0] - affectorPos[0];',
             '    var dy = parentedPos[1] - affectorPos[1];',
             '    ',
-            '    // Direction for global gap',
-            '    var dirX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);',
-            '    var dirY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);',
-            '    ',
-            '    // How many items away (for global gap)',
-            '    var itemsAwayX = Math.abs(dx) / itemSize;',
-            '    var itemsAwayY = Math.abs(dy) / itemSize;',
-            '    ',
-            '    // Adjust for inner radius (offset distance by innerR)',
-            '    var distX = Math.abs(dx) > innerR ? (Math.abs(dx) - innerR) * (dx >= 0 ? 1 : -1) : 0;',
-            '    var distY = Math.abs(dy) > innerR ? (Math.abs(dy) - innerR) * (dy >= 0 ? 1 : -1) : 0;',
-            '    ',
             '    // Get max scale (at center)',
             '    var maxScalePercent = 100;',
             '    try { maxScalePercent = affector.effect("Scale")("Slider").value; } catch(e) {}',
             '    var growth = maxScalePercent / 100 - 1;',
             '    ',
-            '    // Integral values for this position',
-            '    var integralX = influenceIntegral(distX, falloffRadius);',
-            '    var integralY = influenceIntegral(distY, falloffRadius);',
             '    var maxIntegral = falloffRadius / 2;',
             '    if (maxIntegral <= 0) maxIntegral = 1;',
             '    ',
-            '    // Scale compensation: offset = growth * itemSize * normalized_integral',
-            '    var compOffsetX = growth * itemSize * integralX / maxIntegral;',
-            '    var compOffsetY = growth * itemSize * integralY / maxIntegral;',
+            '    var totalOffsetX = 0;',
+            '    var totalOffsetY = 0;',
             '    ',
-            '    // Affector Gap: smooth transition using same integral',
-            '    var affectorOffsetX = affectorGap * integralX / maxIntegral;',
-            '    var affectorOffsetY = affectorGap * integralY / maxIntegral;',
-            '    ',
-            '    // Global Gap: affects ALL items based on distance (itemsAway)',
-            '    // Direction flip at center is tiny since itemsAway approaches 0',
-            '    var globalOffsetX = itemsAwayX * globalGap * dirX;',
-            '    var globalOffsetY = itemsAwayY * globalGap * dirY;',
-            '    ',
-            '    // Combine offsets',
-            '    var totalOffsetX = compOffsetX + affectorOffsetX + globalOffsetX;',
-            '    var totalOffsetY = compOffsetY + affectorOffsetY + globalOffsetY;',
+            '    if (lineMode) {',
+            '        // LINE MODE: spread along line direction only',
+            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        var cosA = Math.cos(angle);',
+            '        var sinA = Math.sin(angle);',
+            '        ',
+            '        // Distance along line (signed - which side of center)',
+            '        var alongDist = dx * cosA + dy * sinA;',
+            '        ',
+            '        // Adjust for inner radius',
+            '        var distAlong = Math.abs(alongDist) > innerR ? (Math.abs(alongDist) - innerR) * (alongDist >= 0 ? 1 : -1) : 0;',
+            '        ',
+            '        // Integral for along-line direction',
+            '        var integralAlong = influenceIntegral(distAlong, falloffRadius);',
+            '        ',
+            '        // Scale compensation',
+            '        var compOffset = growth * itemSize * integralAlong / maxIntegral;',
+            '        ',
+            '        // Affector Gap',
+            '        var affectorOffset = affectorGap * integralAlong / maxIntegral;',
+            '        ',
+            '        // Global Gap',
+            '        var itemsAway = Math.abs(alongDist) / itemSize;',
+            '        var alongDir = alongDist > 0 ? 1 : (alongDist < 0 ? -1 : 0);',
+            '        var globalOffset = itemsAway * globalGap * alongDir;',
+            '        ',
+            '        // Total offset along line direction',
+            '        var totalAlong = compOffset + affectorOffset + globalOffset;',
+            '        ',
+            '        // Convert along-line offset back to X/Y',
+            '        // Line direction is (cosA, sinA)',
+            '        totalOffsetX = totalAlong * cosA;',
+            '        totalOffsetY = totalAlong * sinA;',
+            '    } else {',
+            '        // CIRCLE MODE: original behavior',
+            '        var dirX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);',
+            '        var dirY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);',
+            '        var itemsAwayX = Math.abs(dx) / itemSize;',
+            '        var itemsAwayY = Math.abs(dy) / itemSize;',
+            '        var distX = Math.abs(dx) > innerR ? (Math.abs(dx) - innerR) * (dx >= 0 ? 1 : -1) : 0;',
+            '        var distY = Math.abs(dy) > innerR ? (Math.abs(dy) - innerR) * (dy >= 0 ? 1 : -1) : 0;',
+            '        var integralX = influenceIntegral(distX, falloffRadius);',
+            '        var integralY = influenceIntegral(distY, falloffRadius);',
+            '        var compOffsetX = growth * itemSize * integralX / maxIntegral;',
+            '        var compOffsetY = growth * itemSize * integralY / maxIntegral;',
+            '        var affectorOffsetX = affectorGap * integralX / maxIntegral;',
+            '        var affectorOffsetY = affectorGap * integralY / maxIntegral;',
+            '        var globalOffsetX = itemsAwayX * globalGap * dirX;',
+            '        var globalOffsetY = itemsAwayY * globalGap * dirY;',
+            '        totalOffsetX = compOffsetX + affectorOffsetX + globalOffsetX;',
+            '        totalOffsetY = compOffsetY + affectorOffsetY + globalOffsetY;',
+            '    }',
             '    ',
             '    // Apply Affector Gap Falloff (multiplies gaps based on influence)',
             '    var influence = getAffectorInfluence(parentedPos);',
@@ -2795,6 +2869,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    try { return affector.effect("Influence")("Slider").value; } catch(e) { return 100; }',
             '}',
             '',
+            'function getAffectorLineMode() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Line Mode")("Checkbox").value; } catch(e) { return 0; }',
+            '}',
+            '',
             'function getAffectorInfluence(pos) {',
             '    if (!affector) return 0;',
             '    var globalInf = getGlobalInfluence() / 100;',
@@ -2805,7 +2884,18 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    if (outerR <= 0) return 0;',
             '    var dx = pos[0] - affectorPos[0];',
             '    var dy = pos[1] - affectorPos[1];',
-            '    var dist = Math.sqrt(dx * dx + dy * dy);',
+            '    ',
+            '    // Line mode: use distance along line direction (perpendicular axis is infinite)',
+            '    var lineMode = getAffectorLineMode();',
+            '    var dist;',
+            '    if (lineMode) {',
+            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        // Distance along line direction (dot product with line direction)',
+            '        dist = Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));',
+            '    } else {',
+            '        dist = Math.sqrt(dx * dx + dy * dy);',
+            '    }',
+            '    ',
             '    if (dist <= innerR) return globalInf;',
             '    if (dist >= outerR) return 0;',
             '    var falloffRange = outerR - innerR;',
@@ -2871,6 +2961,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var globalGap = getGlobalGap();',
             '    var outerR = getAffectorOuterRadius();',
             '    var innerR = getAffectorInnerRadius();',
+            '    var lineMode = getAffectorLineMode();',
             '    if (itemSize <= 0) itemSize = 100;',
             '    ',
             '    // Effective radius for falloff (outer - inner)',
@@ -2881,45 +2972,69 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var dx = parentedPos[0] - affectorPos[0];',
             '    var dy = parentedPos[1] - affectorPos[1];',
             '    ',
-            '    // Direction for global gap',
-            '    var dirX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);',
-            '    var dirY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);',
-            '    ',
-            '    // How many items away (for global gap)',
-            '    var itemsAwayX = Math.abs(dx) / itemSize;',
-            '    var itemsAwayY = Math.abs(dy) / itemSize;',
-            '    ',
-            '    // Adjust for inner radius (offset distance by innerR)',
-            '    var distX = Math.abs(dx) > innerR ? (Math.abs(dx) - innerR) * (dx >= 0 ? 1 : -1) : 0;',
-            '    var distY = Math.abs(dy) > innerR ? (Math.abs(dy) - innerR) * (dy >= 0 ? 1 : -1) : 0;',
-            '    ',
             '    // Get max scale (at center)',
             '    var maxScalePercent = 100;',
             '    try { maxScalePercent = affector.effect("Scale")("Slider").value; } catch(e) {}',
             '    var growth = maxScalePercent / 100 - 1;',
             '    ',
-            '    // Integral values for this position',
-            '    var integralX = influenceIntegral(distX, falloffRadius);',
-            '    var integralY = influenceIntegral(distY, falloffRadius);',
             '    var maxIntegral = falloffRadius / 2;',
             '    if (maxIntegral <= 0) maxIntegral = 1;',
             '    ',
-            '    // Scale compensation: offset = growth * itemSize * normalized_integral',
-            '    var compOffsetX = growth * itemSize * integralX / maxIntegral;',
-            '    var compOffsetY = growth * itemSize * integralY / maxIntegral;',
+            '    var totalOffsetX = 0;',
+            '    var totalOffsetY = 0;',
             '    ',
-            '    // Affector Gap: smooth transition using same integral',
-            '    var affectorOffsetX = affectorGap * integralX / maxIntegral;',
-            '    var affectorOffsetY = affectorGap * integralY / maxIntegral;',
-            '    ',
-            '    // Global Gap: affects ALL items based on distance (itemsAway)',
-            '    // Direction flip at center is tiny since itemsAway approaches 0',
-            '    var globalOffsetX = itemsAwayX * globalGap * dirX;',
-            '    var globalOffsetY = itemsAwayY * globalGap * dirY;',
-            '    ',
-            '    // Combine offsets',
-            '    var totalOffsetX = compOffsetX + affectorOffsetX + globalOffsetX;',
-            '    var totalOffsetY = compOffsetY + affectorOffsetY + globalOffsetY;',
+            '    if (lineMode) {',
+            '        // LINE MODE: spread along line direction only',
+            '        var angle = affector.transform.rotation.value * Math.PI / 180;',
+            '        var cosA = Math.cos(angle);',
+            '        var sinA = Math.sin(angle);',
+            '        ',
+            '        // Distance along line (signed - which side of center)',
+            '        var alongDist = dx * cosA + dy * sinA;',
+            '        ',
+            '        // Adjust for inner radius',
+            '        var distAlong = Math.abs(alongDist) > innerR ? (Math.abs(alongDist) - innerR) * (alongDist >= 0 ? 1 : -1) : 0;',
+            '        ',
+            '        // Integral for along-line direction',
+            '        var integralAlong = influenceIntegral(distAlong, falloffRadius);',
+            '        ',
+            '        // Scale compensation',
+            '        var compOffset = growth * itemSize * integralAlong / maxIntegral;',
+            '        ',
+            '        // Affector Gap',
+            '        var affectorOffset = affectorGap * integralAlong / maxIntegral;',
+            '        ',
+            '        // Global Gap',
+            '        var itemsAway = Math.abs(alongDist) / itemSize;',
+            '        var alongDir = alongDist > 0 ? 1 : (alongDist < 0 ? -1 : 0);',
+            '        var globalOffset = itemsAway * globalGap * alongDir;',
+            '        ',
+            '        // Total offset along line direction',
+            '        var totalAlong = compOffset + affectorOffset + globalOffset;',
+            '        ',
+            '        // Convert along-line offset back to X/Y',
+            '        // Line direction is (cosA, sinA)',
+            '        totalOffsetX = totalAlong * cosA;',
+            '        totalOffsetY = totalAlong * sinA;',
+            '    } else {',
+            '        // CIRCLE MODE: original behavior',
+            '        var dirX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);',
+            '        var dirY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);',
+            '        var itemsAwayX = Math.abs(dx) / itemSize;',
+            '        var itemsAwayY = Math.abs(dy) / itemSize;',
+            '        var distX = Math.abs(dx) > innerR ? (Math.abs(dx) - innerR) * (dx >= 0 ? 1 : -1) : 0;',
+            '        var distY = Math.abs(dy) > innerR ? (Math.abs(dy) - innerR) * (dy >= 0 ? 1 : -1) : 0;',
+            '        var integralX = influenceIntegral(distX, falloffRadius);',
+            '        var integralY = influenceIntegral(distY, falloffRadius);',
+            '        var compOffsetX = growth * itemSize * integralX / maxIntegral;',
+            '        var compOffsetY = growth * itemSize * integralY / maxIntegral;',
+            '        var affectorOffsetX = affectorGap * integralX / maxIntegral;',
+            '        var affectorOffsetY = affectorGap * integralY / maxIntegral;',
+            '        var globalOffsetX = itemsAwayX * globalGap * dirX;',
+            '        var globalOffsetY = itemsAwayY * globalGap * dirY;',
+            '        totalOffsetX = compOffsetX + affectorOffsetX + globalOffsetX;',
+            '        totalOffsetY = compOffsetY + affectorOffsetY + globalOffsetY;',
+            '    }',
             '    ',
             '    // Apply Affector Gap Falloff (multiplies gaps based on influence)',
             '    var influence = getAffectorInfluence(parentedPos);',
