@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var verticalButton = document.getElementById('addVertical');
     var gridButton = document.getElementById('addGrid');
     var radialButton = document.getElementById('addRadial');
+    var largeCardsButton = document.getElementById('addLargeCards');
 
     // Helper to get follow options from checkboxes
     function getFollowOptions() {
@@ -117,5 +118,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     radialButton.addEventListener('click', function() {
         csInterface.evalScript('addRadialCarousel()');
+    });
+
+    largeCardsButton.addEventListener('click', function() {
+        csInterface.evalScript('addLargeCards()');
     });
 });

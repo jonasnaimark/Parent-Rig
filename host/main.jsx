@@ -1680,6 +1680,14 @@ function addAffector() {
         return "error";
     }
 
+    // Capture selected layers BEFORE creating affector (creation changes selection)
+    var selectedLayersForStandalone = [];
+    for (var si = 1; si <= comp.numLayers; si++) {
+        if (comp.layer(si).selected) {
+            selectedLayersForStandalone.push(comp.layer(si));
+        }
+    }
+
     // Check which affectors already exist (1-4)
     var existingAffectors = [false, false, false, false];
     for (var i = 1; i <= comp.numLayers; i++) {
@@ -1858,62 +1866,230 @@ function addAffector() {
         posZ.name = "Position Z";
         posZ.property("Slider").setValue(0);
 
-        // Auto-detect item size from existing Parent Rig children
+        // AUTO-DETECT FROM SPACING (positions are reliable, sourceRectAtTime is not)
+        //
+        // The math:
+        // - spacing = itemSize + gap (center to center distance)
+        // - When items scale by growth%, they grow by: itemSize * growth
+        // - Gap closes by: itemSize * growth (if both adjacent items scale)
+        // - Compensation formula: compOffset = growth * sliderValue * integralFactor
+        // - integralFactor ≈ 0.5 for nearby items
+        // - To maintain gap: sliderValue = itemSize * 2 (for 1D) or * 4 (for 2D)
+        // - Since itemSize ≈ spacing * 0.85: sliderValue = spacing * 1.7 (1D) or * 3.4 (2D)
+        //
         var detectedItemSize = 400;  // Default fallback
+        var debugInfo = [];
+
         try {
-            var childPositions = [];
-            for (var ci = 1; ci <= comp.numLayers; ci++) {
-                var layer = comp.layer(ci);
-                var layerEffects = layer.property("ADBE Effect Parade");
-                if (layerEffects) {
-                    for (var ei = 1; ei <= layerEffects.numProperties; ei++) {
-                        var eff = layerEffects.property(ei);
-                        if (eff && (eff.matchName === "Pseudo/ParentRigChild" || eff.name === "Parent Rig - Child")) {
-                            var pos = layer.transform.position.value;
-                            childPositions.push({x: pos[0], y: pos[1]});
-                            break;
+            // Step 1: Find parent layer (look for Parent Rig or layer with "Parent" in name)
+            var parentLayer = null;
+            debugInfo.push("Looking for parent among " + comp.numLayers + " layers");
+
+            for (var pi = 1; pi <= comp.numLayers; pi++) {
+                var pLayer = comp.layer(pi);
+                var pName = pLayer.name;
+                // Skip affectors and targets
+                if (pName.indexOf("Affector") >= 0 || pName.indexOf("Target") >= 0) continue;
+                // Find parent - check for Parent Rig effect OR layer name containing "Parent"
+                var hasParentRig = hasEffect(pLayer, "Parent Rig - Parent");
+                var hasDelay = hasEffect(pLayer, "PR_Delay");
+                var nameHasParent = (pName.indexOf("Parent") >= 0);
+
+                if (hasParentRig || hasDelay || nameHasParent) {
+                    parentLayer = pLayer;
+                    debugInfo.push("Found parent: " + pName + " (index " + pi + ")");
+                    break;
+                }
+            }
+
+            if (!parentLayer) {
+                debugInfo.push("No parent layer found!");
+            }
+
+            // Step 2: Collect child positions AND sizes
+            // Parent Rig uses expressions, NOT AE layer parenting, so we find children by:
+            // - Looking for layers with "Parent Rig - Child" effect, OR
+            // - All layers that aren't parent/affector/target (for presets)
+            var childX = [];
+            var childY = [];
+            var childWidths = [];
+            var childHeights = [];
+
+            if (parentLayer) {
+                for (var ci = 1; ci <= comp.numLayers; ci++) {
+                    var layer = comp.layer(ci);
+                    var lName = layer.name;
+
+                    // Skip parent, affectors, targets
+                    if (layer.index === parentLayer.index) continue;
+                    if (lName.indexOf("Affector") >= 0) continue;
+                    if (lName.indexOf("Target") >= 0) continue;
+                    if (lName.indexOf("Parent") >= 0 && lName.indexOf("Parent Rig") < 0) continue;
+
+                    // Check if it's a child (has child effect OR is a shape layer in a preset)
+                    var isChild = hasEffect(layer, "Parent Rig - Child") || hasEffect(layer, "PR_Delay");
+
+                    // For presets, children are shape layers without parent/affector/target in name
+                    if (!isChild && layer instanceof ShapeLayer) {
+                        // It's likely a preset child shape
+                        isChild = true;
+                    }
+
+                    if (isChild) {
+                        var pos = layer.transform.position.value;
+                        childX.push(pos[0]);
+                        childY.push(pos[1]);
+
+                        // Try multiple methods to get layer size
+                        var layerWidth = 0;
+                        var layerHeight = 0;
+                        var sizeMethod = "none";
+
+                        // Method 1: sourceRectAtTime (standard way)
+                        try {
+                            var rect = layer.sourceRectAtTime(0, false);
+                            if (rect && rect.width > 0) {
+                                layerWidth = rect.width;
+                                layerHeight = rect.height;
+                                sizeMethod = "sourceRectAtTime";
+                            }
+                        } catch (e) {}
+
+                        // Method 2: Try with comp.time instead of 0
+                        if (layerWidth === 0) {
+                            try {
+                                var rect2 = layer.sourceRectAtTime(comp.time, false);
+                                if (rect2 && rect2.width > 0) {
+                                    layerWidth = rect2.width;
+                                    layerHeight = rect2.height;
+                                    sizeMethod = "sourceRectAtTime(comp.time)";
+                                }
+                            } catch (e) {}
                         }
+
+                        // Method 3: For shape layers, try reading Rectangle Path size
+                        if (layerWidth === 0 && layer instanceof ShapeLayer) {
+                            try {
+                                var contents = layer.property("Contents");
+                                for (var gi = 1; gi <= contents.numProperties; gi++) {
+                                    var group = contents.property(gi);
+                                    if (group.matchName === "ADBE Vector Group") {
+                                        var groupContents = group.property("Contents");
+                                        for (var si = 1; si <= groupContents.numProperties; si++) {
+                                            var shape = groupContents.property(si);
+                                            if (shape.matchName === "ADBE Vector Shape - Rect") {
+                                                var size = shape.property("Size").value;
+                                                layerWidth = size[0];
+                                                layerHeight = size[1];
+                                                sizeMethod = "Rectangle Path Size";
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (layerWidth > 0) break;
+                                }
+                            } catch (e) {}
+                        }
+
+                        childWidths.push(layerWidth);
+                        childHeights.push(layerHeight);
+                        debugInfo.push("Child: " + lName + " pos[" + Math.round(pos[0]) + "," + Math.round(pos[1]) + "] size[" + layerWidth + "x" + layerHeight + "] via " + sizeMethod);
                     }
                 }
+                debugInfo.push("Found " + childX.length + " children total");
             }
-            if (childPositions.length >= 2) {
-                // Sort by X to check horizontal layout
-                childPositions.sort(function(a, b) { return a.x - b.x; });
-                var xSpacings = [];
-                for (var si = 1; si < childPositions.length; si++) {
-                    xSpacings.push(Math.abs(childPositions[si].x - childPositions[si-1].x));
+
+            if (childX.length >= 2) {
+                // Step 3: Find minimum spacing in X and Y
+                childX.sort(function(a,b) { return a - b; });
+                childY.sort(function(a,b) { return a - b; });
+
+                var minSpacingX = Infinity;
+                var minSpacingY = Infinity;
+
+                for (var xi = 1; xi < childX.length; xi++) {
+                    var diffX = childX[xi] - childX[xi-1];
+                    if (diffX > 20 && diffX < minSpacingX) minSpacingX = diffX;
                 }
-                // Sort by Y to check vertical layout
-                childPositions.sort(function(a, b) { return a.y - b.y; });
-                var ySpacings = [];
-                for (var si = 1; si < childPositions.length; si++) {
-                    ySpacings.push(Math.abs(childPositions[si].y - childPositions[si-1].y));
+                for (var yi = 1; yi < childY.length; yi++) {
+                    var diffY = childY[yi] - childY[yi-1];
+                    if (diffY > 20 && diffY < minSpacingY) minSpacingY = diffY;
                 }
-                // Use whichever has larger average spacing (that's the layout direction)
-                var avgX = xSpacings.length > 0 ? xSpacings.reduce(function(a,b){return a+b;},0) / xSpacings.length : 0;
-                var avgY = ySpacings.length > 0 ? ySpacings.reduce(function(a,b){return a+b;},0) / ySpacings.length : 0;
-                detectedItemSize = Math.round(Math.max(avgX, avgY));
-                if (detectedItemSize < 10) detectedItemSize = 400;  // Sanity check
+
+                debugInfo.push("minSpacingX: " + minSpacingX + ", minSpacingY: " + minSpacingY);
+
+                // Step 4: Detect 1D vs 2D and arrangement direction
+                var xRange = childX[childX.length-1] - childX[0];
+                var yRange = childY[childY.length-1] - childY[0];
+                var is2D = (xRange > 50 && yRange > 50);
+                var isHorizontal = (xRange > yRange);  // Items spread more in X = horizontal arrangement
+                debugInfo.push("xRange: " + xRange + ", yRange: " + yRange + ", is2D: " + is2D + ", horizontal: " + isHorizontal);
+
+                // Step 5: Get average item size
+                var avgWidth = 0, avgHeight = 0;
+                for (var wi = 0; wi < childWidths.length; wi++) {
+                    avgWidth += childWidths[wi];
+                    avgHeight += childHeights[wi];
+                }
+                avgWidth = avgWidth / childWidths.length;
+                avgHeight = avgHeight / childHeights.length;
+                debugInfo.push("avgWidth: " + Math.round(avgWidth) + ", avgHeight: " + Math.round(avgHeight));
+
+                // Step 6: Calculate slider value using the PROPER FORMULA
+                //
+                // The expression uses: compOffset = growth * sliderValue * integralRatio
+                // Where integralRatio ≈ 2*spacing/outerRadius for immediate neighbors
+                //
+                // For proper compensation: sliderValue = itemSize / integralRatio
+                // Therefore: sliderValue = itemSize * outerRadius / (2 * spacing) for 1D
+                //            sliderValue = itemSize * outerRadius / spacing for 2D (more neighbors)
+                //
+                var itemDimension;
+                if (is2D) {
+                    itemDimension = Math.min(avgWidth, avgHeight);
+                } else if (isHorizontal) {
+                    itemDimension = avgWidth;
+                } else {
+                    itemDimension = avgHeight;
+                }
+
+                var spacing = is2D ? Math.min(minSpacingX, minSpacingY) : (isHorizontal ? minSpacingX : minSpacingY);
+                var gap = spacing - itemDimension;
+
+                // Outer radius defaults to half the smaller comp dimension
+                var outerRadius = Math.min(comp.width, comp.height) / 2;
+
+                // Apply the formula: itemSize * outerRadius / (2 * spacing)
+                // Same formula for both 1D and 2D - the divide by 2 accounts for
+                // spread going in both directions from the scaling center
+                detectedItemSize = Math.round(itemDimension * outerRadius / (2 * spacing));
+
+                debugInfo.push("itemDimension: " + Math.round(itemDimension) + ", spacing: " + spacing + ", gap: " + Math.round(gap));
+                debugInfo.push("outerRadius: " + outerRadius + ", formula result: " + detectedItemSize);
+            } else {
+                debugInfo.push("Not enough children: " + childX.length);
             }
         } catch (detectErr) {
-            // Fall back to default if detection fails
+            debugInfo.push("Error: " + detectErr.toString());
             detectedItemSize = 400;
         }
 
-        // Item Size (width/height of items - auto-detected or set manually)
+        // Debug info available in debugInfo array if needed
+
+        // Item Size (auto-detected, used internally for gap calculations)
         var itemSize = effects.addProperty("ADBE Slider Control");
         itemSize.name = "Item Size";
         itemSize.property("Slider").setValue(detectedItemSize);
 
-        // Affector Gap (adjusts gaps in the affector zone)
+        // Outer Affector Gap (adjusts gaps in the affector zone + ripples to neighbors)
         var affectorGap = effects.addProperty("ADBE Slider Control");
-        affectorGap.name = "Affector Gap";
+        affectorGap.name = "Outer Affector Gap";
         affectorGap.property("Slider").setValue(0);
 
-        // Affector Gap Falloff (multiply gaps at center, 100 = no change)
-        var gapFalloff = effects.addProperty("ADBE Slider Control");
-        gapFalloff.name = "Affector Gap Falloff";
-        gapFalloff.property("Slider").setValue(100);
+        // Inner Affector Gap (only affects items inside the zone)
+        var innerGapCtrl = effects.addProperty("ADBE Slider Control");
+        innerGapCtrl.name = "Inner Affector Gap";
+        innerGapCtrl.property("Slider").setValue(0);
 
         // Global Gap (adjusts gaps between ALL items uniformly)
         var globalGap = effects.addProperty("ADBE Slider Control");
@@ -1960,6 +2136,15 @@ function addAffector() {
         // Update existing rigged children to include affector code
         updateExistingRigsWithAffector(comp);
 
+        // Apply standalone effects to pre-captured selected layers
+        applyStandaloneToLayers(comp, selectedLayersForStandalone);
+
+        // Select the new affector layer
+        for (var rs = 0; rs < selectedLayersForStandalone.length; rs++) {
+            try { selectedLayersForStandalone[rs].selected = false; } catch(e) {}
+        }
+        affector.selected = true;
+
     } catch (e) {
         alert("Error creating affector: " + e.toString());
         app.endUndoGroup();
@@ -1979,6 +2164,14 @@ function addTarget() {
     if (!comp || !(comp instanceof CompItem)) {
         alert("Please select a composition.");
         return "error";
+    }
+
+    // Capture selected layers BEFORE creating target (creation changes selection)
+    var selectedLayersForStandalone = [];
+    for (var si = 1; si <= comp.numLayers; si++) {
+        if (comp.layer(si).selected) {
+            selectedLayersForStandalone.push(comp.layer(si));
+        }
     }
 
     // Check which targets already exist (1-4)
@@ -2078,8 +2271,6 @@ function addTarget() {
         var lookAtOuterStroke = lookAtOuterVectors.addProperty("ADBE Vector Graphic - Stroke");
         lookAtOuterStroke.property("ADBE Vector Stroke Color").setValue(lookAtOuterColor);
         lookAtOuterStroke.property("ADBE Vector Stroke Width").setValue(2);
-        lookAtOuterStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Dash 1").setValue(15);
-        lookAtOuterStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Gap 1").setValue(10);
 
         // Look At Inner ellipse group
         var lookAtInnerGroup = contents.addProperty("ADBE Vector Group");
@@ -2091,8 +2282,6 @@ function addTarget() {
         var lookAtInnerStroke = lookAtInnerVectors.addProperty("ADBE Vector Graphic - Stroke");
         lookAtInnerStroke.property("ADBE Vector Stroke Color").setValue(lookAtInnerColor);
         lookAtInnerStroke.property("ADBE Vector Stroke Width").setValue(2);
-        lookAtInnerStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Dash 1").setValue(10);
-        lookAtInnerStroke.property("ADBE Vector Stroke Dashes").addProperty("ADBE Vector Stroke Gap 1").setValue(8);
 
         // Crosshair - horizontal line
         var hLineGroup = contents.addProperty("ADBE Vector Group");
@@ -2164,10 +2353,10 @@ function addTarget() {
         lookAtFalloffSlider.setValueAtTime(0, 100);
         lookAtFalloffSlider.setValueAtTime(60 * comp.frameDuration, 0);
 
-        // Delay Influence: 100 = current behavior (ignores delay), 0 = syncs with visual position
+        // Parent Delay Influence: 0 = uses actual positions, 100 = syncs with delayed visual positions
         var delayInfluence = effects.addProperty("ADBE Slider Control");
-        delayInfluence.name = "Delay Influence";
-        delayInfluence.property("Slider").setValue(100);
+        delayInfluence.name = "Parent Delay Influence";
+        delayInfluence.property("Slider").setValue(0);
 
         // === REPEL SETTINGS ===
         var repel = effects.addProperty("ADBE Checkbox Control");
@@ -2230,6 +2419,15 @@ function addTarget() {
 
         // Update existing rigged children to include target code
         updateExistingRigsWithTarget(comp);
+
+        // Apply standalone effects to pre-captured selected layers
+        applyStandaloneToLayers(comp, selectedLayersForStandalone);
+
+        // Select the new target layer
+        for (var rs = 0; rs < selectedLayersForStandalone.length; rs++) {
+            try { selectedLayersForStandalone[rs].selected = false; } catch(e) {}
+        }
+        target.selected = true;
 
     } catch (e) {
         alert("Error creating target: " + e.toString());
@@ -3073,12 +3271,12 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '',
             'function getAffectorGap() {',
             '    if (!affector) return 0;',
-            '    try { return affector.effect("Affector Gap")("Slider").value; } catch(e) { return 0; }',
+            '    try { return affector.effect("Outer Affector Gap")("Slider").value; } catch(e) { return 0; }',
             '}',
             '',
-            'function getAffectorGapFalloff() {',
-            '    if (!affector) return 100;',
-            '    try { return affector.effect("Affector Gap Falloff")("Slider").value; } catch(e) { return 100; }',
+            'function getAffectorInnerGap() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Inner Affector Gap")("Slider").value; } catch(e) { return 0; }',
             '}',
             '',
             'function getGlobalGap() {',
@@ -3116,7 +3314,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var affectorPos = affector.transform.position.value;',
             '    var itemSize = getAffectorItemSize();',
             '    var affectorGap = getAffectorGap();',
-            '    var gapFalloff = getAffectorGapFalloff();',
+            '    var innerGap = getAffectorInnerGap();',
             '    var globalGap = getGlobalGap();',
             '    var outerR = getAffectorOuterRadius();',
             '    var innerR = getAffectorInnerRadius();',
@@ -3160,7 +3358,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        // Scale compensation',
             '        var compOffset = growth * itemSize * integralAlong / maxIntegral;',
             '        ',
-            '        // Affector Gap',
+            '        // Outer Affector Gap',
             '        var affectorOffset = affectorGap * integralAlong / maxIntegral;',
             '        ',
             '        // Global Gap',
@@ -3176,30 +3374,41 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        totalOffsetX = totalAlong * cosA;',
             '        totalOffsetY = totalAlong * sinA;',
             '    } else {',
-            '        // CIRCLE MODE: original behavior',
-            '        var dirX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);',
-            '        var dirY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);',
-            '        var itemsAwayX = Math.abs(dx) / itemSize;',
-            '        var itemsAwayY = Math.abs(dy) / itemSize;',
-            '        var distX = Math.abs(dx) > innerR ? (Math.abs(dx) - innerR) * (dx >= 0 ? 1 : -1) : 0;',
-            '        var distY = Math.abs(dy) > innerR ? (Math.abs(dy) - innerR) * (dy >= 0 ? 1 : -1) : 0;',
-            '        var integralX = influenceIntegral(distX, falloffRadius);',
-            '        var integralY = influenceIntegral(distY, falloffRadius);',
-            '        var compOffsetX = growth * itemSize * integralX / maxIntegral;',
-            '        var compOffsetY = growth * itemSize * integralY / maxIntegral;',
-            '        var affectorOffsetX = affectorGap * integralX / maxIntegral;',
-            '        var affectorOffsetY = affectorGap * integralY / maxIntegral;',
-            '        var globalOffsetX = itemsAwayX * globalGap * dirX;',
-            '        var globalOffsetY = itemsAwayY * globalGap * dirY;',
-            '        totalOffsetX = compOffsetX + affectorOffsetX + globalOffsetX;',
-            '        totalOffsetY = compOffsetY + affectorOffsetY + globalOffsetY;',
+            '        // CIRCLE MODE: true radial spread with LINEAR gaps',
+            '        // Calculate radial distance and direction',
+            '        var radialDist = Math.sqrt(dx * dx + dy * dy);',
+            '        if (radialDist < 0.001) radialDist = 0.001; // Avoid division by zero',
+            '        var unitX = dx / radialDist;',
+            '        var unitY = dy / radialDist;',
+            '        ',
+            '        // Adjust for inner radius (spread starts from inner edge)',
+            '        var effectiveDist = radialDist > innerR ? radialDist - innerR : 0;',
+            '        ',
+            '        // Use LINEAR spread for consistent gaps (not quadratic integral)',
+            '        // Linear ratio: 0 at inner edge, 1 at falloff boundary',
+            '        var linearRatio = falloffRadius > 0 ? Math.min(effectiveDist / falloffRadius, 1) : 0;',
+            '        ',
+            '        // Scale compensation (radial) - linear for even gaps',
+            '        var compOffset = growth * itemSize * linearRatio;',
+            '        ',
+            '        // Affector gap (radial) - also linear',
+            '        var affectorOffset = affectorGap * linearRatio;',
+            '        ',
+            '        // Global gap (based on how many items away)',
+            '        var itemsAway = radialDist / itemSize;',
+            '        var globalOffset = itemsAway * globalGap;',
+            '        ',
+            '        // Total radial offset, applied in unit direction',
+            '        var totalRadial = compOffset + affectorOffset + globalOffset;',
+            '        totalOffsetX = totalRadial * unitX;',
+            '        totalOffsetY = totalRadial * unitY;',
             '    }',
             '    ',
-            '    // Apply Affector Gap Falloff (multiplies gaps based on influence)',
+            '    // Apply Inner Affector Gap (expands/contracts gaps inside zone)',
             '    var influence = getAffectorInfluence(parentedPos);',
-            '    var gapFalloffMult = 1 + (gapFalloff / 100 - 1) * influence;',
+            '    var innerGapMult = 1 + (innerGap / 100) * influence;',
             '    ',
-            '    return [totalOffsetX * gapFalloffMult, totalOffsetY * gapFalloffMult];',
+            '    return [totalOffsetX * innerGapMult, totalOffsetY * innerGapMult];',
             '}',
             '',
             'function getAffectorPositionOffset(pos) {',
@@ -3694,12 +3903,12 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '',
             'function getAffectorGap() {',
             '    if (!affector) return 0;',
-            '    try { return affector.effect("Affector Gap")("Slider").value; } catch(e) { return 0; }',
+            '    try { return affector.effect("Outer Affector Gap")("Slider").value; } catch(e) { return 0; }',
             '}',
             '',
-            'function getAffectorGapFalloff() {',
-            '    if (!affector) return 100;',
-            '    try { return affector.effect("Affector Gap Falloff")("Slider").value; } catch(e) { return 100; }',
+            'function getAffectorInnerGap() {',
+            '    if (!affector) return 0;',
+            '    try { return affector.effect("Inner Affector Gap")("Slider").value; } catch(e) { return 0; }',
             '}',
             '',
             'function getGlobalGap() {',
@@ -3737,7 +3946,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var affectorPos = affector.transform.position.value;',
             '    var itemSize = getAffectorItemSize();',
             '    var affectorGap = getAffectorGap();',
-            '    var gapFalloff = getAffectorGapFalloff();',
+            '    var innerGap = getAffectorInnerGap();',
             '    var globalGap = getGlobalGap();',
             '    var outerR = getAffectorOuterRadius();',
             '    var innerR = getAffectorInnerRadius();',
@@ -3781,7 +3990,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        // Scale compensation',
             '        var compOffset = growth * itemSize * integralAlong / maxIntegral;',
             '        ',
-            '        // Affector Gap',
+            '        // Outer Affector Gap',
             '        var affectorOffset = affectorGap * integralAlong / maxIntegral;',
             '        ',
             '        // Global Gap',
@@ -3797,30 +4006,41 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        totalOffsetX = totalAlong * cosA;',
             '        totalOffsetY = totalAlong * sinA;',
             '    } else {',
-            '        // CIRCLE MODE: original behavior',
-            '        var dirX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);',
-            '        var dirY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);',
-            '        var itemsAwayX = Math.abs(dx) / itemSize;',
-            '        var itemsAwayY = Math.abs(dy) / itemSize;',
-            '        var distX = Math.abs(dx) > innerR ? (Math.abs(dx) - innerR) * (dx >= 0 ? 1 : -1) : 0;',
-            '        var distY = Math.abs(dy) > innerR ? (Math.abs(dy) - innerR) * (dy >= 0 ? 1 : -1) : 0;',
-            '        var integralX = influenceIntegral(distX, falloffRadius);',
-            '        var integralY = influenceIntegral(distY, falloffRadius);',
-            '        var compOffsetX = growth * itemSize * integralX / maxIntegral;',
-            '        var compOffsetY = growth * itemSize * integralY / maxIntegral;',
-            '        var affectorOffsetX = affectorGap * integralX / maxIntegral;',
-            '        var affectorOffsetY = affectorGap * integralY / maxIntegral;',
-            '        var globalOffsetX = itemsAwayX * globalGap * dirX;',
-            '        var globalOffsetY = itemsAwayY * globalGap * dirY;',
-            '        totalOffsetX = compOffsetX + affectorOffsetX + globalOffsetX;',
-            '        totalOffsetY = compOffsetY + affectorOffsetY + globalOffsetY;',
+            '        // CIRCLE MODE: true radial spread with LINEAR gaps',
+            '        // Calculate radial distance and direction',
+            '        var radialDist = Math.sqrt(dx * dx + dy * dy);',
+            '        if (radialDist < 0.001) radialDist = 0.001; // Avoid division by zero',
+            '        var unitX = dx / radialDist;',
+            '        var unitY = dy / radialDist;',
+            '        ',
+            '        // Adjust for inner radius (spread starts from inner edge)',
+            '        var effectiveDist = radialDist > innerR ? radialDist - innerR : 0;',
+            '        ',
+            '        // Use LINEAR spread for consistent gaps (not quadratic integral)',
+            '        // Linear ratio: 0 at inner edge, 1 at falloff boundary',
+            '        var linearRatio = falloffRadius > 0 ? Math.min(effectiveDist / falloffRadius, 1) : 0;',
+            '        ',
+            '        // Scale compensation (radial) - linear for even gaps',
+            '        var compOffset = growth * itemSize * linearRatio;',
+            '        ',
+            '        // Affector gap (radial) - also linear',
+            '        var affectorOffset = affectorGap * linearRatio;',
+            '        ',
+            '        // Global gap (based on how many items away)',
+            '        var itemsAway = radialDist / itemSize;',
+            '        var globalOffset = itemsAway * globalGap;',
+            '        ',
+            '        // Total radial offset, applied in unit direction',
+            '        var totalRadial = compOffset + affectorOffset + globalOffset;',
+            '        totalOffsetX = totalRadial * unitX;',
+            '        totalOffsetY = totalRadial * unitY;',
             '    }',
             '    ',
-            '    // Apply Affector Gap Falloff (multiplies gaps based on influence)',
+            '    // Apply Inner Affector Gap (expands/contracts gaps inside zone)',
             '    var influence = getAffectorInfluence(parentedPos);',
-            '    var gapFalloffMult = 1 + (gapFalloff / 100 - 1) * influence;',
+            '    var innerGapMult = 1 + (innerGap / 100) * influence;',
             '    ',
-            '    return [totalOffsetX * gapFalloffMult, totalOffsetY * gapFalloffMult];',
+            '    return [totalOffsetX * innerGapMult, totalOffsetY * innerGapMult];',
             '}',
             '',
             'function getAffectorPositionOffset(pos) {',
@@ -4525,9 +4745,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '// Apply ratio to child rest scale',
         'var parentDrivenScale = mulArrays(restScale, influencedRatio);',
         '',
-        '// Apply Affector scale multiplier (based on current position)',
-        'var currentPos = thisLayer.transform.position.value;',
-        'var scaleMult = getAffectorScaleMult(currentPos) / 100;',
+        '// Apply Affector scale multiplier',
+        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
+        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
+        'var scaleMult = getAffectorScaleMult(restPosForAffector) / 100;',
         'parentDrivenScale = [parentDrivenScale[0] * scaleMult, parentDrivenScale[1] * scaleMult' + (is3D ? ', parentDrivenScale[2] * scaleMult' : '') + '];',
         '',
         '// Handle child animation: calculate child\'s own scale ratio relative to rest',
@@ -4570,9 +4791,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '',
         'var parentDrivenRot = restRot + accRotDelta;',
         '',
-        '// Apply Affector rotation boost (based on current position)',
-        'var currentPos = thisLayer.transform.position.value;',
-        'var rotBoost = getAffectorRotationZBoost(currentPos);',
+        '// Apply Affector rotation boost',
+        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
+        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
+        'var rotBoost = getAffectorRotationZBoost(restPosForAffector);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         '// Calculate parented position for look-at (rest + parent delta, with delay influence)',
@@ -4582,11 +4804,11 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentRestPosY = cp("Parent Rest Pos Y");',
         'var parentPosNow = parentLayer.transform.position.value;',
         '',
-        '// Get delay influence from target (100 = use current parent pos, 0 = use delayed parent pos)',
-        'var targetDelayInf = 100;',
+        '// Get parent delay influence from target (0 = use actual pos, 100 = use delayed pos)',
+        'var targetDelayInf = 0;',
         'try {',
         '    var tgt = thisComp.layer("Parent Rig Target");',
-        '    if (tgt) targetDelayInf = tgt.effect("Delay Influence")("Slider").value;',
+        '    if (tgt) targetDelayInf = tgt.effect("Parent Delay Influence")("Slider").value;',
         '} catch(e) {}',
         '',
         '// Calculate delayed parent position using time remapping',
@@ -4595,7 +4817,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentPosDelayed = parentPosProp.valueAtTime(posRemapInfo.t1);',
         '',
         '// Blend between current and delayed parent position based on delay influence',
-        'var delayBlend = targetDelayInf / 100;',
+        'var delayBlend = 1 - (targetDelayInf / 100);',
         'var parentPosBlended = [',
         '    parentPosDelayed[0] + (parentPosNow[0] - parentPosDelayed[0]) * delayBlend,',
         '    parentPosDelayed[1] + (parentPosNow[1] - parentPosDelayed[1]) * delayBlend',
@@ -4643,11 +4865,13 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenRot = restRot + accRotDelta;',
         '',
         '// Apply Affector X rotation boost',
-        'var currentPos = thisLayer.transform.position.value;',
-        'var rotBoost = getAffectorRotationXBoost(currentPos);',
+        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
+        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
+        'var rotBoost = getAffectorRotationXBoost(restPosForAffector);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
-        '// Apply Target look-at X rotation (pitch)',
+        '// Apply Target look-at X rotation (pitch) - uses current position for look-at direction',
+        'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
         'parentDrivenRot = getTargetLookAtRotationX(currentPos, parentDrivenRot);',
         '',
         'var childAnimRot = value;',
@@ -4685,8 +4909,9 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenRot = restRot + accRotDelta;',
         '',
         '// Apply Affector Y rotation boost',
-        'var currentPos = thisLayer.transform.position.value;',
-        'var rotBoost = getAffectorRotationYBoost(currentPos);',
+        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
+        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
+        'var rotBoost = getAffectorRotationYBoost(restPosForAffector);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         'var childAnimRot = value;',
@@ -4720,9 +4945,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var effectiveRatio = 1 + accRatioOffset;',
         'var parentDrivenOpacity = restOpacity * effectiveRatio;',
         '',
-        '// Apply Affector opacity multiplier (based on current position)',
-        'var currentPos = thisLayer.transform.position.value;',
-        'var opacityMult = getAffectorOpacityMult(currentPos) / 100;',
+        '// Apply Affector opacity multiplier',
+        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
+        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
+        'var opacityMult = getAffectorOpacityMult(restPosForAffector) / 100;',
         'parentDrivenOpacity = parentDrivenOpacity * opacityMult;',
         '',
         'var childAnimOpacity = value;',
@@ -5530,7 +5756,14 @@ function addHorizontalCarousel() {
         rectPath.property("ADBE Vector Rect Roundness").setValue(cornerRadius);
 
         var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
-        fill.property("ADBE Vector Fill Color").setValue([0, 0, 0, 1]); // Black
+        fill.property("ADBE Vector Fill Color").setValue([1, 1, 1, 1]); // White
+
+        // Add soft drop shadow
+        var dropShadow = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        dropShadow.property(2).setValue(40);  // Opacity (0-255)
+        dropShadow.property(3).setValue(180); // Direction
+        dropShadow.property(4).setValue(12);  // Distance
+        dropShadow.property(5).setValue(80);  // Softness
 
         // Set world position first
         var xPos = startX + (i * (shapeWidth + gap));
@@ -5584,7 +5817,14 @@ function addVerticalList() {
         rectPath.property("ADBE Vector Rect Roundness").setValue(cornerRadius);
 
         var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
-        fill.property("ADBE Vector Fill Color").setValue([0, 0, 0, 1]); // Black
+        fill.property("ADBE Vector Fill Color").setValue([1, 1, 1, 1]); // White
+
+        // Add soft drop shadow
+        var dropShadow = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        dropShadow.property(2).setValue(40);  // Opacity (0-255)
+        dropShadow.property(3).setValue(180); // Direction
+        dropShadow.property(4).setValue(12);  // Distance
+        dropShadow.property(5).setValue(80);  // Softness
 
         // Set world position first
         var yPos = startY + (i * (shapeHeight + gap));
@@ -5610,7 +5850,7 @@ function addGrid() {
     var squareSize = 180;
     var gap = 30;
     var cornerRadius = 20;
-    var fillColor = [0.1, 0.1, 0.1, 1]; // Dark gray
+    var fillColor = [1, 1, 1, 1]; // White
 
     // Calculate total grid size
     var totalWidth = gridSize * squareSize + (gridSize - 1) * gap;
@@ -5648,6 +5888,13 @@ function addGrid() {
             var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
             fill.property("ADBE Vector Fill Color").setValue(fillColor);
 
+            // Add soft drop shadow
+            var dropShadow = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+            dropShadow.property(2).setValue(40);  // Opacity (0-255)
+            dropShadow.property(3).setValue(180); // Direction
+            dropShadow.property(4).setValue(12);  // Distance
+            dropShadow.property(5).setValue(80);  // Softness
+
             // Position the layer
             layer.transform.position.setValue([x, y]);
 
@@ -5679,7 +5926,7 @@ function addRadialCarousel() {
     var shapeHeight = 220;
     var cornerRadius = 32;
     var gap = 20;
-    var fillColor = [0, 0, 0, 1]; // Black
+    var fillColor = [1, 1, 1, 1]; // White
 
     // Much larger radius for subtle arc
     var radius = 4000;
@@ -5719,6 +5966,13 @@ function addRadialCarousel() {
         var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
         fill.property("ADBE Vector Fill Color").setValue(fillColor);
 
+        // Add soft drop shadow
+        var dropShadow = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        dropShadow.property(2).setValue(40);  // Opacity (0-255)
+        dropShadow.property(3).setValue(180); // Direction
+        dropShadow.property(4).setValue(12);  // Distance
+        dropShadow.property(5).setValue(80);  // Softness
+
         // Calculate angle: center item is at -90 degrees (straight up)
         var offsetFromCenter = i - centerIndex;
         var angleDegrees = -90 + (offsetFromCenter * degreesPerItem);
@@ -5744,4 +5998,905 @@ function addRadialCarousel() {
     parentNull.selected = true;
 
     app.endUndoGroup();
+}
+
+function addLargeCards() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return;
+    }
+
+    app.beginUndoGroup("Add Large Cards");
+
+    var shapeWidth = 600;
+    var shapeHeight = 600;
+    var gap = 30;
+    var cornerRadius = 48;
+    var numShapes = 9;
+    var compCenter = [comp.width / 2, comp.height / 2];
+
+    // Calculate total width to center
+    var totalWidth = (numShapes * shapeWidth) + ((numShapes - 1) * gap);
+    var startX = compCenter[0] - (totalWidth / 2) + (shapeWidth / 2);
+
+    // Create parent null first
+    var parentNull = comp.layers.addShape();
+    parentNull.name = "Large Cards Parent";
+    parentNull.transform.position.setValue([comp.width / 2, comp.height / 2]);
+    parentNull.label = 9; // Green
+
+    // Create shapes
+    for (var i = 0; i < numShapes; i++) {
+        var layer = comp.layers.addShape();
+        layer.name = "Large Card " + (i + 1);
+
+        // Add rectangle shape
+        var contents = layer.property("ADBE Root Vectors Group");
+        var rectGroup = contents.addProperty("ADBE Vector Group");
+        rectGroup.name = "Rectangle";
+
+        var rectPath = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Shape - Rect");
+        rectPath.property("ADBE Vector Rect Size").setValue([shapeWidth, shapeHeight]);
+        rectPath.property("ADBE Vector Rect Roundness").setValue(cornerRadius);
+
+        var fill = rectGroup.property("ADBE Vectors Group").addProperty("ADBE Vector Graphic - Fill");
+        fill.property("ADBE Vector Fill Color").setValue([1, 1, 1, 1]); // White
+
+        // Add soft drop shadow
+        var dropShadow = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        dropShadow.property(2).setValue(40);  // Opacity (0-255)
+        dropShadow.property(3).setValue(180); // Direction
+        dropShadow.property(4).setValue(12);  // Distance
+        dropShadow.property(5).setValue(80);  // Softness
+
+        // Set world position first
+        var xPos = startX + (i * (shapeWidth + gap));
+        layer.transform.position.setValue([xPos, compCenter[1]]);
+
+        // Parent to null
+        layer.parent = parentNull;
+    }
+
+    app.endUndoGroup();
+}
+
+// Helper: Apply standalone effects to a list of layers (called from addAffector/addTarget)
+function applyStandaloneToLayers(comp, layers) {
+    if (!layers || layers.length === 0) return;
+
+    // First, clean up any standalone expressions that were incorrectly applied to parent layers
+    for (var c = 0; c < layers.length; c++) {
+        var layer = layers[c];
+        if (hasEffect(layer, "Parent Rig - Parent") || hasEffect(layer, "PR_Delay")) {
+            // Remove standalone expressions from parent layers (they shouldn't have them)
+            try {
+                var expr = layer.transform.position.expression;
+                if (expr && expr.indexOf("Standalone Affector/Target Effects") >= 0) {
+                    layer.transform.position.expression = "";
+                    layer.transform.scale.expression = "";
+                    layer.transform.opacity.expression = "";
+                    if (layer.threeDLayer) {
+                        layer.transform.xRotation.expression = "";
+                        layer.transform.yRotation.expression = "";
+                        layer.transform.zRotation.expression = "";
+                    } else {
+                        layer.transform.rotation.expression = "";
+                    }
+                }
+            } catch(e) {}
+        }
+    }
+
+    // Filter out layers that shouldn't get standalone expressions
+    var validLayers = [];
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        // Skip affector/target layers
+        if (layer.name.indexOf("Parent Rig Affector") === 0) continue;
+        if (layer.name.indexOf("Parent Rig Target") === 0) continue;
+        // Skip layers already rigged with parent rig (both parent and child layers)
+        if (hasEffect(layer, "Parent Rig - Child")) continue;
+        if (hasEffect(layer, "Parent Rig - Parent")) continue;
+        if (hasEffect(layer, "PR_Delay")) continue;  // Fallback parent effect
+        // Skip if layer already has standalone expressions
+        try {
+            var existingExpr = layer.transform.position.expression;
+            if (existingExpr && existingExpr.indexOf("Standalone Affector/Target Effects") >= 0) continue;
+        } catch(e) {}
+        validLayers.push(layer);
+    }
+
+    if (validLayers.length === 0) return;
+
+    // Apply standalone expressions to each valid layer
+    var standaloneHeader = getStandaloneHeader();
+    for (var s = 0; s < validLayers.length; s++) {
+        applyStandaloneToLayer(validLayers[s], standaloneHeader);
+    }
+}
+
+// Generate the standalone expression header (shared by all standalone modes)
+function getStandaloneHeader() {
+    return [
+        '// Standalone Affector/Target Effects',
+        '',
+        '// ===== AFFECTOR SYSTEM =====',
+        'var affectors = [];',
+        'for (var _ai = 1; _ai <= 4; _ai++) {',
+        '    try { var _a = thisComp.layer("Parent Rig Affector " + _ai); if (_a) affectors.push(_a); } catch(e) {}',
+        '}',
+        'try { var _aL = thisComp.layer("Parent Rig Affector"); if (_aL) affectors.push(_aL); } catch(e) {}',
+        '',
+        'function calcInfluenceFor(aff, pos) {',
+        '    if (!aff) return 0;',
+        '    var globalInf = 100;',
+        '    try { globalInf = aff.effect("Influence")("Slider").value; } catch(e) {}',
+        '    globalInf = globalInf / 100;',
+        '    if (globalInf <= 0) return 0;',
+        '    var outerR = 200, innerR = 0;',
+        '    try { outerR = aff.effect("Outer Radius")("Slider").value; } catch(e) {}',
+        '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (outerR <= 0) return 0;',
+        '    var affectorPos = aff.transform.position.value;',
+        '    var dx = pos[0] - affectorPos[0], dy = pos[1] - affectorPos[1], dz = (pos[2] || 0) - (affectorPos[2] || 0);',
+        '    var lineMode = 0;',
+        '    try { lineMode = aff.effect("Line Mode")("Checkbox").value; } catch(e) {}',
+        '    var dist = lineMode ? Math.abs(dx * Math.cos((aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180) + dy * Math.sin((aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180)) : Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    if (dist <= innerR) return globalInf;',
+        '    if (dist >= outerR) return 0;',
+        '    var normalizedDist = (dist - innerR) / (outerR - innerR);',
+        '    try { return (aff.effect("Falloff")("Slider").valueAtTime(normalizedDist * 60 * thisComp.frameDuration) / 100) * globalInf; } catch(e) { return (1 - normalizedDist) * globalInf; }',
+        '}',
+        '',
+        'function calcSpatialInfluenceFor(aff, pos) {',
+        '    if (!aff) return 0;',
+        '    var outerR = 200, innerR = 0;',
+        '    try { outerR = aff.effect("Outer Radius")("Slider").value; } catch(e) {}',
+        '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (outerR <= 0) return 0;',
+        '    var affectorPos = aff.transform.position.value;',
+        '    var dx = pos[0] - affectorPos[0], dy = pos[1] - affectorPos[1], dz = (pos[2] || 0) - (affectorPos[2] || 0);',
+        '    var lineMode = 0;',
+        '    try { lineMode = aff.effect("Line Mode")("Checkbox").value; } catch(e) {}',
+        '    var dist = lineMode ? Math.abs(dx * Math.cos((aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180) + dy * Math.sin((aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180)) : Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    if (dist <= innerR) return 1;',
+        '    if (dist >= outerR) return 0;',
+        '    var normalizedDist = (dist - innerR) / (outerR - innerR);',
+        '    try { return aff.effect("Falloff")("Slider").valueAtTime(normalizedDist * 60 * thisComp.frameDuration) / 100; } catch(e) { return 1 - normalizedDist; }',
+        '}',
+        '',
+        'function getAffectorPositionOffset(pos) {',
+        '    var totalX = 0, totalY = 0, totalZ = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i], inf = calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var px = 0, py = 0, pz = 0;',
+        '            try { px = aff.effect("Position X")("Slider").value; } catch(e) {}',
+        '            try { py = aff.effect("Position Y")("Slider").value; } catch(e) {}',
+        '            try { pz = aff.effect("Position Z")("Slider").value; } catch(e) {}',
+        '            totalX += px * inf; totalY += py * inf; totalZ += pz * inf;',
+        '        }',
+        '    }',
+        '    return [totalX, totalY, totalZ];',
+        '}',
+        '',
+        'function getAffectorScaleMult(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i], inf = calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) { var amt = 100; try { amt = aff.effect("Scale")("Slider").value; } catch(e) {} total += (amt - 100) * inf; }',
+        '    }',
+        '    return 100 + total;',
+        '}',
+        '',
+        'function getMirrorSignFor(aff, pos) {',
+        '    if (!aff) return 1;',
+        '    var mirror = 0; try { mirror = aff.effect("Mirror Rotation")("Checkbox").value; } catch(e) {}',
+        '    if (!mirror) return 1;',
+        '    var affectorPos = aff.transform.position.value;',
+        '    var dx = pos[0] - affectorPos[0], dy = pos[1] - affectorPos[1];',
+        '    var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
+        '    var alongDist = dx * Math.cos(angle) + dy * Math.sin(angle);',
+        '    var innerR = 0; try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (innerR > 0 && Math.abs(alongDist) <= innerR) return 1;',
+        '    return alongDist >= 0 ? 1 : -1;',
+        '}',
+        '',
+        'function getAffectorRotationBoost(pos, axis) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i], mirror = 0;',
+        '        try { mirror = aff.effect("Mirror Rotation")("Checkbox").value; } catch(e) {}',
+        '        var inf = mirror ? calcSpatialInfluenceFor(aff, pos) : calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) { var amt = 0; try { amt = aff.effect("Rotation " + axis)("Slider").value; } catch(e) {} total += amt * inf * getMirrorSignFor(aff, pos); }',
+        '    }',
+        '    return total;',
+        '}',
+        '',
+        'function getAffectorOpacityMult(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i], inf = calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) { var amt = 100; try { amt = aff.effect("Opacity")("Slider").value; } catch(e) {} total += (amt - 100) * inf; }',
+        '    }',
+        '    return 100 + total;',
+        '}',
+        '',
+        '// ===== TARGET SYSTEM =====',
+        'var targets = [];',
+        'for (var _ti = 1; _ti <= 4; _ti++) {',
+        '    try { var _t = thisComp.layer("Parent Rig Target " + _ti); if (_t) targets.push(_t); } catch(e) {}',
+        '}',
+        'try { var _tL = thisComp.layer("Parent Rig Target"); if (_tL) targets.push(_tL); } catch(e) {}',
+        '',
+        'function calcTargetInfluence(tgt, pos, radiusPrefix) {',
+        '    if (!tgt) return 0;',
+        '    var outerR = 500, innerR = 0;',
+        '    try { outerR = tgt.effect(radiusPrefix + " Outer Radius")("Slider").value; } catch(e) { try { outerR = tgt.effect("Outer Radius")("Slider").value; } catch(e2) {} }',
+        '    try { innerR = tgt.effect(radiusPrefix + " Inner Radius")("Slider").value; } catch(e) { try { innerR = tgt.effect("Inner Radius")("Slider").value; } catch(e2) {} }',
+        '    if (outerR <= 0) return 0;',
+        '    var targetPos = tgt.transform.position.value;',
+        '    var dx = pos[0] - targetPos[0], dy = pos[1] - targetPos[1], dz = (pos[2] || 0) - (targetPos[2] || 0);',
+        '    var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    if (dist <= innerR) return 1;',
+        '    if (dist >= outerR) return 0;',
+        '    return 1 - (dist - innerR) / (outerR - innerR);',
+        '}',
+        '',
+        'function getTargetLookAtRotation(pos, currentRot) {',
+        '    var totalRot = currentRot;',
+        '    for (var _i = 0; _i < targets.length; _i++) {',
+        '        var tgt = targets[_i], lookAtEnabled = 0;',
+        '        try { lookAtEnabled = tgt.effect("Look At")("Checkbox").value; } catch(e) {}',
+        '        if (!lookAtEnabled) continue;',
+        '        var influence = calcTargetInfluence(tgt, pos, "Look At");',
+        '        if (influence <= 0) continue;',
+        '        var strength = 100; try { strength = tgt.effect("Strength")("Slider").value; } catch(e) {}',
+        '        if (strength === 0) continue;',
+        '        var rotCorrection = 0; try { rotCorrection = tgt.effect("Z Rotation Correction")("Angle").value; } catch(e) {}',
+        '        var targetPos = tgt.transform.position.value;',
+        '        var dx = targetPos[0] - pos[0], dy = targetPos[1] - pos[1];',
+        '        totalRot += (Math.atan2(dy, dx) * 180 / Math.PI + rotCorrection) * (strength / 100) * influence;',
+        '    }',
+        '    return totalRot;',
+        '}',
+        '',
+        'function getTargetLookAtRotationX(pos, currentRot) {',
+        '    var totalRot = currentRot;',
+        '    for (var _i = 0; _i < targets.length; _i++) {',
+        '        var tgt = targets[_i], lookAtEnabled = 0;',
+        '        try { lookAtEnabled = tgt.effect("Look At")("Checkbox").value; } catch(e) {}',
+        '        if (!lookAtEnabled) continue;',
+        '        var influence = calcTargetInfluence(tgt, pos, "Look At");',
+        '        if (influence <= 0) continue;',
+        '        var strength = 100; try { strength = tgt.effect("Strength")("Slider").value; } catch(e) {}',
+        '        if (strength === 0) continue;',
+        '        var rotCorrection = 0; try { rotCorrection = tgt.effect("X Rotation Correction")("Angle").value; } catch(e) {}',
+        '        var targetPos = tgt.transform.position.value;',
+        '        var dx = targetPos[0] - pos[0], dy = targetPos[1] - pos[1], dz = (targetPos[2] || 0) - (pos[2] || 0);',
+        '        var horizontalDist = Math.sqrt(dx * dx + dy * dy);',
+        '        totalRot += (Math.atan2(dz, horizontalDist) * 180 / Math.PI + rotCorrection) * (strength / 100) * influence;',
+        '    }',
+        '    return totalRot;',
+        '}',
+        '',
+        'function getTargetRepelOffset(pos) {',
+        '    var totalX = 0, totalY = 0, totalZ = 0;',
+        '    for (var _i = 0; _i < targets.length; _i++) {',
+        '        var tgt = targets[_i], repelEnabled = 0;',
+        '        try { repelEnabled = tgt.effect("Repel")("Checkbox").value; } catch(e) {}',
+        '        if (!repelEnabled) continue;',
+        '        var influence = calcTargetInfluence(tgt, pos, "Repel");',
+        '        if (influence <= 0) continue;',
+        '        var strength = 100; try { strength = tgt.effect("Strength")("Slider").value; } catch(e) {}',
+        '        if (strength === 0) continue;',
+        '        var targetPos = tgt.transform.position.value;',
+        '        var dx = pos[0] - targetPos[0], dy = pos[1] - targetPos[1], dz = (pos[2] || 0) - (targetPos[2] || 0);',
+        '        var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '        if (dist < 0.001) continue;',
+        '        var pushAmount = strength * influence;',
+        '        totalX += (dx / dist) * pushAmount; totalY += (dy / dist) * pushAmount; totalZ += (dz / dist) * pushAmount;',
+        '    }',
+        '    return [totalX, totalY, totalZ];',
+        '}',
+        ''
+    ].join('\n');
+}
+
+// Apply standalone expressions to a single layer
+function applyStandaloneToLayer(layer, header) {
+    var is3D = layer.threeDLayer;
+    var restPos = layer.transform.position.value;
+    var restScale = layer.transform.scale.value;
+    var restOpacity = layer.transform.opacity.value;
+
+    // Position expression
+    var posExpr = header + [
+        'var restPos = ' + JSON.stringify(restPos) + ';',
+        'var currentPos = restPos;',
+        'var affOffset = getAffectorPositionOffset(currentPos);',
+        'currentPos = [currentPos[0] + affOffset[0], currentPos[1] + affOffset[1]' + (is3D ? ', currentPos[2] + affOffset[2]' : '') + '];',
+        'var repelOffset = getTargetRepelOffset(currentPos);',
+        'currentPos = [currentPos[0] + repelOffset[0], currentPos[1] + repelOffset[1]' + (is3D ? ', currentPos[2] + repelOffset[2]' : '') + '];',
+        'var animDelta = value - restPos;',
+        is3D ? 'currentPos + animDelta;' : '[currentPos[0] + animDelta[0], currentPos[1] + animDelta[1]];'
+    ].join('\n');
+
+    // Scale expression - use restPos for affector influence calculation
+    var scaleExpr = header + [
+        'var restScale = ' + JSON.stringify(restScale) + ';',
+        'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+        'var scaleMult = getAffectorScaleMult(restPosForAffector) / 100;',
+        'var scaledRest = [restScale[0] * scaleMult, restScale[1] * scaleMult' + (is3D ? ', restScale[2] * scaleMult' : '') + '];',
+        'var animRatio = [value[0] / restScale[0], value[1] / restScale[1]' + (is3D ? ', value[2] / restScale[2]' : '') + '];',
+        '[scaledRest[0] * animRatio[0], scaledRest[1] * animRatio[1]' + (is3D ? ', scaledRest[2] * animRatio[2]' : '') + '];'
+    ].join('\n');
+
+    // Opacity expression - use restPos for affector influence calculation
+    var opacityExpr = header + [
+        'var restOpacity = ' + restOpacity + ';',
+        'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+        'var opacityMult = getAffectorOpacityMult(restPosForAffector) / 100;',
+        'var currentOpacity = restOpacity * opacityMult;',
+        'var animRatio = value / restOpacity;',
+        'clamp(currentOpacity * animRatio, 0, 100);'
+    ].join('\n');
+
+    // Apply position, scale, opacity
+    try { layer.transform.position.expression = posExpr; } catch(e) {}
+    try { layer.transform.scale.expression = scaleExpr; } catch(e) {}
+    try { layer.transform.opacity.expression = opacityExpr; } catch(e) {}
+
+    // Rotation expressions - use restPos for affector influence, currentPos for target look-at
+    if (is3D) {
+        var restRotZ = layer.transform.zRotation.value;
+        var restRotX = layer.transform.xRotation.value;
+        var restRotY = layer.transform.yRotation.value;
+
+        var zRotExpr = header + [
+            'var restRot = ' + restRotZ + ';',
+            'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+            'var currentRot = restRot + getAffectorRotationBoost(restPosForAffector, "Z");',
+            'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
+            'currentRot = getTargetLookAtRotation(currentPos, currentRot);',
+            'currentRot + (value - restRot);'
+        ].join('\n');
+
+        var xRotExpr = header + [
+            'var restRot = ' + restRotX + ';',
+            'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+            'var currentRot = restRot + getAffectorRotationBoost(restPosForAffector, "X");',
+            'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
+            'currentRot = getTargetLookAtRotationX(currentPos, currentRot);',
+            'currentRot + (value - restRot);'
+        ].join('\n');
+
+        var yRotExpr = header + [
+            'var restRot = ' + restRotY + ';',
+            'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+            'var currentRot = restRot + getAffectorRotationBoost(restPosForAffector, "Y");',
+            'currentRot + (value - restRot);'
+        ].join('\n');
+
+        try { layer.transform.zRotation.expression = zRotExpr; } catch(e) {}
+        try { layer.transform.xRotation.expression = xRotExpr; } catch(e) {}
+        try { layer.transform.yRotation.expression = yRotExpr; } catch(e) {}
+    } else {
+        var restRot = layer.transform.rotation.value;
+        var rotExpr = header + [
+            'var restRot = ' + restRot + ';',
+            'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+            'var currentRot = restRot + getAffectorRotationBoost(restPosForAffector, "Z");',
+            'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
+            'currentRot = getTargetLookAtRotation(currentPos, currentRot);',
+            'currentRot + (value - restRot);'
+        ].join('\n');
+
+        try { layer.transform.rotation.expression = rotExpr; } catch(e) {}
+    }
+}
+
+// Apply standalone affector/target effects to selected layers (direct call, with validation)
+// Note: This function is now unused since standalone is triggered via addAffector/addTarget,
+// but kept for potential future direct use or scripting
+function applyStandaloneEffects() {
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please select a composition.");
+        return "error";
+    }
+
+    var selectedLayers = [];
+    for (var i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).selected) {
+            selectedLayers.push(comp.layer(i));
+        }
+    }
+
+    if (selectedLayers.length === 0) {
+        alert("Please select one or more layers to apply effects to.");
+        return "error";
+    }
+
+    // Check if there are any affectors or targets
+    var hasAffector = false;
+    var hasTarget = false;
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var name = comp.layer(i).name;
+        if (name.indexOf("Parent Rig Affector") === 0) hasAffector = true;
+        if (name.indexOf("Parent Rig Target") === 0) hasTarget = true;
+    }
+
+    if (!hasAffector && !hasTarget) {
+        alert("No affectors or targets found. Add an affector or target first.");
+        return "error";
+    }
+
+    app.beginUndoGroup("Apply Standalone Effects");
+
+    // Standalone header - just the affector/target systems, no parent rig timing
+    var standaloneHeader = [
+        '// Standalone Affector/Target Effects',
+        '',
+        '// ===== AFFECTOR SYSTEM =====',
+        'var affectors = [];',
+        'for (var _ai = 1; _ai <= 4; _ai++) {',
+        '    try { var _a = thisComp.layer("Parent Rig Affector " + _ai); if (_a) affectors.push(_a); } catch(e) {}',
+        '}',
+        'try { var _aL = thisComp.layer("Parent Rig Affector"); if (_aL) affectors.push(_aL); } catch(e) {}',
+        '',
+        '// Helper to calculate influence for a given affector layer',
+        'function calcInfluenceFor(aff, pos) {',
+        '    if (!aff) return 0;',
+        '    var globalInf = 100;',
+        '    try { globalInf = aff.effect("Influence")("Slider").value; } catch(e) {}',
+        '    globalInf = globalInf / 100;',
+        '    if (globalInf <= 0) return 0;',
+        '    var outerR = 200;',
+        '    var innerR = 0;',
+        '    try { outerR = aff.effect("Outer Radius")("Slider").value; } catch(e) {}',
+        '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (outerR <= 0) return 0;',
+        '    var affectorPos = aff.transform.position.value;',
+        '    var dx = pos[0] - affectorPos[0];',
+        '    var dy = pos[1] - affectorPos[1];',
+        '    var dz = (pos[2] || 0) - (affectorPos[2] || 0);',
+        '    ',
+        '    var lineMode = 0;',
+        '    try { lineMode = aff.effect("Line Mode")("Checkbox").value; } catch(e) {}',
+        '    var dist;',
+        '    if (lineMode) {',
+        '        var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
+        '        dist = Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));',
+        '    } else {',
+        '        dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    }',
+        '    ',
+        '    if (dist <= innerR) return globalInf;',
+        '    if (dist >= outerR) return 0;',
+        '    var falloffRange = outerR - innerR;',
+        '    var normalizedDist = (dist - innerR) / falloffRange;',
+        '    try {',
+        '        var falloffProp = aff.effect("Falloff")("Slider");',
+        '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+        '        return (falloffVal / 100) * globalInf;',
+        '    } catch(e) { return (1 - normalizedDist) * globalInf; }',
+        '}',
+        '',
+        '// Spatial influence only (ignores global Influence slider)',
+        'function calcSpatialInfluenceFor(aff, pos) {',
+        '    if (!aff) return 0;',
+        '    var outerR = 200;',
+        '    var innerR = 0;',
+        '    try { outerR = aff.effect("Outer Radius")("Slider").value; } catch(e) {}',
+        '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (outerR <= 0) return 0;',
+        '    var affectorPos = aff.transform.position.value;',
+        '    var dx = pos[0] - affectorPos[0];',
+        '    var dy = pos[1] - affectorPos[1];',
+        '    var dz = (pos[2] || 0) - (affectorPos[2] || 0);',
+        '    var lineMode = 0;',
+        '    try { lineMode = aff.effect("Line Mode")("Checkbox").value; } catch(e) {}',
+        '    var dist;',
+        '    if (lineMode) {',
+        '        var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
+        '        dist = Math.abs(dx * Math.cos(angle) + dy * Math.sin(angle));',
+        '    } else {',
+        '        dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    }',
+        '    if (dist <= innerR) return 1;',
+        '    if (dist >= outerR) return 0;',
+        '    var falloffRange = outerR - innerR;',
+        '    var normalizedDist = (dist - innerR) / falloffRange;',
+        '    try {',
+        '        var falloffProp = aff.effect("Falloff")("Slider");',
+        '        var falloffVal = falloffProp.valueAtTime(normalizedDist * 60 * thisComp.frameDuration);',
+        '        return falloffVal / 100;',
+        '    } catch(e) { return 1 - normalizedDist; }',
+        '}',
+        '',
+        'function getAffectorPositionOffset(pos) {',
+        '    var totalX = 0, totalY = 0, totalZ = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i];',
+        '        var inf = calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var px = 0, py = 0, pz = 0;',
+        '            try { px = aff.effect("Position X")("Slider").value; } catch(e) {}',
+        '            try { py = aff.effect("Position Y")("Slider").value; } catch(e) {}',
+        '            try { pz = aff.effect("Position Z")("Slider").value; } catch(e) {}',
+        '            totalX += px * inf;',
+        '            totalY += py * inf;',
+        '            totalZ += pz * inf;',
+        '        }',
+        '    }',
+        '    return [totalX, totalY, totalZ];',
+        '}',
+        '',
+        'function getAffectorScaleMult(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i];',
+        '        var inf = calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var amt = 100;',
+        '            try { amt = aff.effect("Scale")("Slider").value; } catch(e) {}',
+        '            total += (amt - 100) * inf;',
+        '        }',
+        '    }',
+        '    return 100 + total;',
+        '}',
+        '',
+        'function getMirrorSignFor(aff, pos) {',
+        '    if (!aff) return 1;',
+        '    var mirror = 0;',
+        '    try { mirror = aff.effect("Mirror Rotation")("Checkbox").value; } catch(e) {}',
+        '    if (!mirror) return 1;',
+        '    var affectorPos = aff.transform.position.value;',
+        '    var dx = pos[0] - affectorPos[0];',
+        '    var dy = pos[1] - affectorPos[1];',
+        '    var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
+        '    var alongDist = dx * Math.cos(angle) + dy * Math.sin(angle);',
+        '    var innerR = 0;',
+        '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (innerR > 0 && Math.abs(alongDist) <= innerR) return 1;',
+        '    return alongDist >= 0 ? 1 : -1;',
+        '}',
+        '',
+        'function getAffectorRotationXBoost(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i];',
+        '        var mirror = 0;',
+        '        try { mirror = aff.effect("Mirror Rotation")("Checkbox").value; } catch(e) {}',
+        '        var inf = mirror ? calcSpatialInfluenceFor(aff, pos) : calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var amt = 0;',
+        '            try { amt = aff.effect("Rotation X")("Slider").value; } catch(e) {}',
+        '            total += amt * inf * getMirrorSignFor(aff, pos);',
+        '        }',
+        '    }',
+        '    return total;',
+        '}',
+        '',
+        'function getAffectorRotationYBoost(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i];',
+        '        var mirror = 0;',
+        '        try { mirror = aff.effect("Mirror Rotation")("Checkbox").value; } catch(e) {}',
+        '        var inf = mirror ? calcSpatialInfluenceFor(aff, pos) : calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var amt = 0;',
+        '            try { amt = aff.effect("Rotation Y")("Slider").value; } catch(e) {}',
+        '            total += amt * inf * getMirrorSignFor(aff, pos);',
+        '        }',
+        '    }',
+        '    return total;',
+        '}',
+        '',
+        'function getAffectorRotationZBoost(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i];',
+        '        var mirror = 0;',
+        '        try { mirror = aff.effect("Mirror Rotation")("Checkbox").value; } catch(e) {}',
+        '        var inf = mirror ? calcSpatialInfluenceFor(aff, pos) : calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var amt = 0;',
+        '            try { amt = aff.effect("Rotation Z")("Slider").value; } catch(e) {}',
+        '            total += amt * inf * getMirrorSignFor(aff, pos);',
+        '        }',
+        '    }',
+        '    return total;',
+        '}',
+        '',
+        'function getAffectorOpacityMult(pos) {',
+        '    var total = 0;',
+        '    for (var _i = 0; _i < affectors.length; _i++) {',
+        '        var aff = affectors[_i];',
+        '        var inf = calcInfluenceFor(aff, pos);',
+        '        if (inf > 0) {',
+        '            var amt = 100;',
+        '            try { amt = aff.effect("Opacity")("Slider").value; } catch(e) {}',
+        '            total += (amt - 100) * inf;',
+        '        }',
+        '    }',
+        '    return 100 + total;',
+        '}',
+        '',
+        '// ===== TARGET SYSTEM =====',
+        'var targets = [];',
+        'for (var _ti = 1; _ti <= 4; _ti++) {',
+        '    try { var _t = thisComp.layer("Parent Rig Target " + _ti); if (_t) targets.push(_t); } catch(e) {}',
+        '}',
+        'try { var _tL = thisComp.layer("Parent Rig Target"); if (_tL) targets.push(_tL); } catch(e) {}',
+        '',
+        'function calcLookAtInfluenceFor(tgt, pos) {',
+        '    if (!tgt) return 0;',
+        '    var outerR = 500;',
+        '    var innerR = 0;',
+        '    try { outerR = tgt.effect("Outer Radius")("Slider").value; } catch(e) {}',
+        '    try { innerR = tgt.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (outerR <= 0) return 0;',
+        '    var targetPos = tgt.transform.position.value;',
+        '    var dx = pos[0] - targetPos[0];',
+        '    var dy = pos[1] - targetPos[1];',
+        '    var dz = (pos[2] || 0) - (targetPos[2] || 0);',
+        '    var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    if (dist <= innerR) return 1;',
+        '    if (dist >= outerR) return 0;',
+        '    var normalizedDist = (dist - innerR) / (outerR - innerR);',
+        '    return 1 - normalizedDist;',
+        '}',
+        '',
+        'function calcRepelInfluenceFor(tgt, pos) {',
+        '    if (!tgt) return 0;',
+        '    var outerR = 500;',
+        '    var innerR = 0;',
+        '    try { outerR = tgt.effect("Outer Radius")("Slider").value; } catch(e) {}',
+        '    try { innerR = tgt.effect("Inner Radius")("Slider").value; } catch(e) {}',
+        '    if (outerR <= 0) return 0;',
+        '    var targetPos = tgt.transform.position.value;',
+        '    var dx = pos[0] - targetPos[0];',
+        '    var dy = pos[1] - targetPos[1];',
+        '    var dz = (pos[2] || 0) - (targetPos[2] || 0);',
+        '    var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '    if (dist <= innerR) return 1;',
+        '    if (dist >= outerR) return 0;',
+        '    var normalizedDist = (dist - innerR) / (outerR - innerR);',
+        '    return 1 - normalizedDist;',
+        '}',
+        '',
+        'function getTargetLookAtRotation(pos, currentRot) {',
+        '    var totalRot = currentRot;',
+        '    for (var _i = 0; _i < targets.length; _i++) {',
+        '        var tgt = targets[_i];',
+        '        var lookAtEnabled = 0;',
+        '        try { lookAtEnabled = tgt.effect("Look At")("Checkbox").value; } catch(e) {}',
+        '        if (!lookAtEnabled) continue;',
+        '        var influence = calcLookAtInfluenceFor(tgt, pos);',
+        '        if (influence <= 0) continue;',
+        '        var strength = 100;',
+        '        try { strength = tgt.effect("Strength")("Slider").value; } catch(e) {}',
+        '        if (strength === 0) continue;',
+        '        var rotCorrection = 0;',
+        '        try { rotCorrection = tgt.effect("Z Rotation Correction")("Angle").value; } catch(e) {}',
+        '        var targetPos = tgt.transform.position.value;',
+        '        var dx = targetPos[0] - pos[0];',
+        '        var dy = targetPos[1] - pos[1];',
+        '        var angleToTarget = Math.atan2(dy, dx) * 180 / Math.PI + rotCorrection;',
+        '        var lookAtAngle = angleToTarget * (strength / 100);',
+        '        totalRot += lookAtAngle * influence;',
+        '    }',
+        '    return totalRot;',
+        '}',
+        '',
+        'function getTargetLookAtRotationX(pos, currentRot) {',
+        '    var totalRot = currentRot;',
+        '    for (var _i = 0; _i < targets.length; _i++) {',
+        '        var tgt = targets[_i];',
+        '        var lookAtEnabled = 0;',
+        '        try { lookAtEnabled = tgt.effect("Look At")("Checkbox").value; } catch(e) {}',
+        '        if (!lookAtEnabled) continue;',
+        '        var influence = calcLookAtInfluenceFor(tgt, pos);',
+        '        if (influence <= 0) continue;',
+        '        var strength = 100;',
+        '        try { strength = tgt.effect("Strength")("Slider").value; } catch(e) {}',
+        '        if (strength === 0) continue;',
+        '        var rotCorrection = 0;',
+        '        try { rotCorrection = tgt.effect("X Rotation Correction")("Angle").value; } catch(e) {}',
+        '        var targetPos = tgt.transform.position.value;',
+        '        var dx = targetPos[0] - pos[0];',
+        '        var dy = targetPos[1] - pos[1];',
+        '        var dz = (targetPos[2] || 0) - (pos[2] || 0);',
+        '        var horizontalDist = Math.sqrt(dx * dx + dy * dy);',
+        '        var pitchAngle = Math.atan2(dz, horizontalDist) * 180 / Math.PI + rotCorrection;',
+        '        var lookAtPitch = pitchAngle * (strength / 100);',
+        '        totalRot += lookAtPitch * influence;',
+        '    }',
+        '    return totalRot;',
+        '}',
+        '',
+        'function getTargetRepelOffset(pos) {',
+        '    var totalX = 0, totalY = 0, totalZ = 0;',
+        '    for (var _i = 0; _i < targets.length; _i++) {',
+        '        var tgt = targets[_i];',
+        '        var repelEnabled = 0;',
+        '        try { repelEnabled = tgt.effect("Repel")("Checkbox").value; } catch(e) {}',
+        '        if (!repelEnabled) continue;',
+        '        var influence = calcRepelInfluenceFor(tgt, pos);',
+        '        if (influence <= 0) continue;',
+        '        var strength = 100;',
+        '        try { strength = tgt.effect("Strength")("Slider").value; } catch(e) {}',
+        '        if (strength === 0) continue;',
+        '        var targetPos = tgt.transform.position.value;',
+        '        var dx = pos[0] - targetPos[0];',
+        '        var dy = pos[1] - targetPos[1];',
+        '        var dz = (pos[2] || 0) - (targetPos[2] || 0);',
+        '        var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);',
+        '        if (dist < 0.001) continue;',
+        '        var pushAmount = strength * influence;',
+        '        totalX += (dx / dist) * pushAmount;',
+        '        totalY += (dy / dist) * pushAmount;',
+        '        totalZ += (dz / dist) * pushAmount;',
+        '    }',
+        '    return [totalX, totalY, totalZ];',
+        '}',
+        ''
+    ].join('\n');
+
+    for (var s = 0; s < selectedLayers.length; s++) {
+        var layer = selectedLayers[s];
+        var is3D = layer.threeDLayer;
+
+        // Skip affector/target layers themselves
+        if (layer.name.indexOf("Parent Rig Affector") === 0 || layer.name.indexOf("Parent Rig Target") === 0) {
+            continue;
+        }
+
+        // Skip layers that already have parent rig
+        if (hasEffect(layer, "Parent Rig - Child")) {
+            continue;
+        }
+
+        // Store rest values
+        var restPos = layer.transform.position.value;
+        var restScale = layer.transform.scale.value;
+        var restOpacity = layer.transform.opacity.value;
+
+        // Position expression
+        var posExpr = standaloneHeader + [
+            'var restPos = ' + JSON.stringify(restPos) + ';',
+            'var currentPos = restPos;',
+            '',
+            '// Apply affector position offset',
+            'var affOffset = getAffectorPositionOffset(currentPos);',
+            'currentPos = [currentPos[0] + affOffset[0], currentPos[1] + affOffset[1]' + (is3D ? ', currentPos[2] + affOffset[2]' : '') + '];',
+            '',
+            '// Apply target repel',
+            'var repelOffset = getTargetRepelOffset(currentPos);',
+            'currentPos = [currentPos[0] + repelOffset[0], currentPos[1] + repelOffset[1]' + (is3D ? ', currentPos[2] + repelOffset[2]' : '') + '];',
+            '',
+            '// Add any animation delta',
+            'var animDelta = value - restPos;',
+            is3D ? 'currentPos + animDelta;' : '[currentPos[0] + animDelta[0], currentPos[1] + animDelta[1]];'
+        ].join('\n');
+
+        // Scale expression - use restPos for affector influence calculation
+        var scaleExpr = standaloneHeader + [
+            'var restScale = ' + JSON.stringify(restScale) + ';',
+            'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+            '',
+            '// Apply affector scale (using rest position for influence)',
+            'var scaleMult = getAffectorScaleMult(restPosForAffector) / 100;',
+            'var scaledRest = [restScale[0] * scaleMult, restScale[1] * scaleMult' + (is3D ? ', restScale[2] * scaleMult' : '') + '];',
+            '',
+            '// Add any animation delta (as ratio)',
+            'var animRatio = [value[0] / restScale[0], value[1] / restScale[1]' + (is3D ? ', value[2] / restScale[2]' : '') + '];',
+            '[scaledRest[0] * animRatio[0], scaledRest[1] * animRatio[1]' + (is3D ? ', scaledRest[2] * animRatio[2]' : '') + '];'
+        ].join('\n');
+
+        // Rotation expression (Z or 2D rotation) - use restPos for affector influence, currentPos for target look-at
+        var restRot, rotExpr;
+        if (is3D) {
+            restRot = layer.transform.zRotation.value;
+            var restRotX = layer.transform.xRotation.value;
+            var restRotY = layer.transform.yRotation.value;
+
+            rotExpr = standaloneHeader + [
+                'var restRot = ' + restRot + ';',
+                'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+                '',
+                '// Apply affector rotation boost (using rest position for influence)',
+                'var rotBoost = getAffectorRotationZBoost(restPosForAffector);',
+                'var currentRot = restRot + rotBoost;',
+                '',
+                '// Apply target look-at (using current position for direction)',
+                'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
+                'currentRot = getTargetLookAtRotation(currentPos, currentRot);',
+                '',
+                '// Add any animation delta',
+                'var animDelta = value - restRot;',
+                'currentRot + animDelta;'
+            ].join('\n');
+
+            var xRotExpr = standaloneHeader + [
+                'var restRot = ' + restRotX + ';',
+                'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+                '',
+                '// Apply affector rotation boost (using rest position for influence)',
+                'var rotBoost = getAffectorRotationXBoost(restPosForAffector);',
+                'var currentRot = restRot + rotBoost;',
+                '',
+                '// Apply target look-at (pitch) - using current position for direction',
+                'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
+                'currentRot = getTargetLookAtRotationX(currentPos, currentRot);',
+                '',
+                '// Add any animation delta',
+                'var animDelta = value - restRot;',
+                'currentRot + animDelta;'
+            ].join('\n');
+
+            var yRotExpr = standaloneHeader + [
+                'var restRot = ' + restRotY + ';',
+                'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+                '',
+                '// Apply affector rotation boost (using rest position for influence)',
+                'var rotBoost = getAffectorRotationYBoost(restPosForAffector);',
+                'var currentRot = restRot + rotBoost;',
+                '',
+                '// Add any animation delta',
+                'var animDelta = value - restRot;',
+                'currentRot + animDelta;'
+            ].join('\n');
+
+            try { layer.transform.zRotation.expression = rotExpr; } catch(e) {}
+            try { layer.transform.xRotation.expression = xRotExpr; } catch(e) {}
+            try { layer.transform.yRotation.expression = yRotExpr; } catch(e) {}
+        } else {
+            restRot = layer.transform.rotation.value;
+            rotExpr = standaloneHeader + [
+                'var restRot = ' + restRot + ';',
+                'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+                '',
+                '// Apply affector rotation boost (using rest position for influence)',
+                'var rotBoost = getAffectorRotationZBoost(restPosForAffector);',
+                'var currentRot = restRot + rotBoost;',
+                '',
+                '// Apply target look-at (using current position for direction)',
+                'var currentPos = thisLayer.toWorld(thisLayer.transform.anchorPoint);',
+                'currentRot = getTargetLookAtRotation(currentPos, currentRot);',
+                '',
+                '// Add any animation delta',
+                'var animDelta = value - restRot;',
+                'currentRot + animDelta;'
+            ].join('\n');
+
+            try { layer.transform.rotation.expression = rotExpr; } catch(e) {}
+        }
+
+        // Opacity expression - use restPos for affector influence calculation
+        var opacityExpr = standaloneHeader + [
+            'var restOpacity = ' + restOpacity + ';',
+            'var restPosForAffector = ' + JSON.stringify(restPos) + ';',
+            '',
+            '// Apply affector opacity (using rest position for influence)',
+            'var opacityMult = getAffectorOpacityMult(restPosForAffector) / 100;',
+            'var currentOpacity = restOpacity * opacityMult;',
+            '',
+            '// Add any animation delta (as ratio)',
+            'var animRatio = value / restOpacity;',
+            'clamp(currentOpacity * animRatio, 0, 100);'
+        ].join('\n');
+
+        // Apply expressions
+        try { layer.transform.position.expression = posExpr; } catch(e) {}
+        try { layer.transform.scale.expression = scaleExpr; } catch(e) {}
+        try { layer.transform.opacity.expression = opacityExpr; } catch(e) {}
+    }
+
+    app.endUndoGroup();
+    return "success";
 }
