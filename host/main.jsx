@@ -82,7 +82,24 @@ function applyParentRig(optionsJSON) {
             var relationships = findParentChildRelationships(selectedLayers, comp);
 
             if (relationships.length === 0) {
-                messageToShow = "No parent-child relationships found in selection.\n\nMake sure selected layers have a parent assigned.";
+                // No parent assigned - auto-create a parent shape layer at center
+                if (selectedLayers.length > 0) {
+                    // Convert LayerCollection to array for rigParentChildGroup
+                    var childArray = [];
+                    for (var k = 0; k < selectedLayers.length; k++) {
+                        childArray.push(selectedLayers[k]);
+                    }
+                    var autoParent = createAutoParentLayer(comp, childArray);
+                    // Parent all selected layers to the new auto-parent
+                    for (var j = 0; j < childArray.length; j++) {
+                        childArray[j].parent = autoParent;
+                    }
+                    // Now rig with the auto-parent
+                    rigParentChildGroup(autoParent, childArray, comp, followOptions);
+                    result = "success";
+                } else {
+                    messageToShow = "No layers selected.";
+                }
             } else {
                 // Apply rig to each parent-children group
                 for (var i = 0; i < relationships.length; i++) {
@@ -177,6 +194,43 @@ function isNullOrEmptyShape(layer) {
 // Check if this is a rig layer we created (name ends with " - Parent Rig")
 function isCreatedRigLayer(layer) {
     return layer.name.indexOf(" - Parent Rig") === layer.name.length - 13;
+}
+
+// Create an auto-parent shape layer when selected layers have no parent
+function createAutoParentLayer(comp, childLayers) {
+    // Create empty shape layer at center of comp
+    var autoParent = comp.layers.addShape();
+    autoParent.name = "Parent Rig";
+
+    // Check if any child is 3D
+    var is3D = false;
+    for (var i = 0; i < childLayers.length; i++) {
+        if (childLayers[i].threeDLayer) {
+            is3D = true;
+            break;
+        }
+    }
+    if (is3D) {
+        autoParent.threeDLayer = true;
+    }
+
+    // Position at center of comp
+    var centerX = comp.width / 2;
+    var centerY = comp.height / 2;
+    autoParent.transform.position.setValue([centerX, centerY]);
+    autoParent.transform.anchorPoint.setValue([0, 0]);
+
+    // Move to bottom of selected layers
+    var lowestLayer = childLayers[0];
+    for (var j = 1; j < childLayers.length; j++) {
+        if (childLayers[j].index > lowestLayer.index) {
+            lowestLayer = childLayers[j];
+        }
+    }
+    // Move below all children (higher index = lower in layer stack)
+    autoParent.moveAfter(lowestLayer);
+
+    return autoParent;
 }
 
 // Create an invisible parent rig layer for visible parent layers
@@ -3444,7 +3498,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '}',
             '',
             '// Helper to get mirror sign for a specific affector',
-            '// Returns -1 or 1 based on which side of inner radius boundary item is',
+            '// Returns -1 or 1 based on which side of the affector line the item is',
             'function getMirrorSignFor(aff, pos) {',
             '    if (!aff) return 1;',
             '    var mirror = 0;',
@@ -3454,16 +3508,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var dx = pos[0] - affectorPos[0];',
             '    var dy = pos[1] - affectorPos[1];',
             '    var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
-            '    var alongDist = dx * Math.cos(angle) + dy * Math.sin(angle);',
+            '    // Use PERPENDICULAR distance to determine which side of the line',
+            '    // perpDist = -dx * sin(angle) + dy * cos(angle)',
+            '    // For 0° rotation: perpDist = dy (above/below)',
+            '    // For 90° rotation: perpDist = -dx (left/right)',
+            '    var perpDist = -dx * Math.sin(angle) + dy * Math.cos(angle);',
             '    // Get inner radius - items within inner radius get no mirror flip',
             '    var innerR = 0;',
             '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
             '    // Within inner radius: no flip (neutral zone)',
-            '    if (innerR > 0 && Math.abs(alongDist) <= innerR) {',
+            '    if (innerR > 0 && Math.abs(perpDist) <= innerR) {',
             '        return 1;',
             '    }',
-            '    // Outside inner radius: flip based on which side',
-            '    return alongDist >= 0 ? 1 : -1;',
+            '    // Outside inner radius: flip based on which side of the line',
+            '    return perpDist >= 0 ? 1 : -1;',
             '}',
             '',
             'function getAffectorRotationXBoost(pos) {',
@@ -4076,7 +4134,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '}',
             '',
             '// Helper to get mirror sign for a specific affector',
-            '// Returns -1 or 1 based on which side of inner radius boundary item is',
+            '// Returns -1 or 1 based on which side of the affector line the item is',
             'function getMirrorSignFor(aff, pos) {',
             '    if (!aff) return 1;',
             '    var mirror = 0;',
@@ -4086,16 +4144,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    var dx = pos[0] - affectorPos[0];',
             '    var dy = pos[1] - affectorPos[1];',
             '    var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
-            '    var alongDist = dx * Math.cos(angle) + dy * Math.sin(angle);',
+            '    // Use PERPENDICULAR distance to determine which side of the line',
+            '    // perpDist = -dx * sin(angle) + dy * cos(angle)',
+            '    // For 0° rotation: perpDist = dy (above/below)',
+            '    // For 90° rotation: perpDist = -dx (left/right)',
+            '    var perpDist = -dx * Math.sin(angle) + dy * Math.cos(angle);',
             '    // Get inner radius - items within inner radius get no mirror flip',
             '    var innerR = 0;',
             '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
             '    // Within inner radius: no flip (neutral zone)',
-            '    if (innerR > 0 && Math.abs(alongDist) <= innerR) {',
+            '    if (innerR > 0 && Math.abs(perpDist) <= innerR) {',
             '        return 1;',
             '    }',
-            '    // Outside inner radius: flip based on which side',
-            '    return alongDist >= 0 ? 1 : -1;',
+            '    // Outside inner radius: flip based on which side of the line',
+            '    return perpDist >= 0 ? 1 : -1;',
             '}',
             '',
             'function getAffectorRotationXBoost(pos) {',
@@ -4746,9 +4808,14 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenScale = mulArrays(restScale, influencedRatio);',
         '',
         '// Apply Affector scale multiplier',
-        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
-        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
-        'var scaleMult = getAffectorScaleMult(restPosForAffector) / 100;',
+        '// Use delayed position (rest + delayed parent delta) so affector matches child visual position',
+        'var affectorPosRemapInfo = getRemapInfo(time, parentLayer.transform.position);',
+        'var parentPosForAffector = parentLayer.transform.position.valueAtTime(affectorPosRemapInfo.t1);',
+        'var currentPosForAffector = [',
+        '    cp("Rest Pos X") + (parentPosForAffector[0] - cp("Parent Rest Pos X")) * affectorPosRemapInfo.segInfluence,',
+        '    cp("Rest Pos Y") + (parentPosForAffector[1] - cp("Parent Rest Pos Y")) * affectorPosRemapInfo.segInfluence',
+        '];',
+        'var scaleMult = getAffectorScaleMult(currentPosForAffector) / 100;',
         'parentDrivenScale = [parentDrivenScale[0] * scaleMult, parentDrivenScale[1] * scaleMult' + (is3D ? ', parentDrivenScale[2] * scaleMult' : '') + '];',
         '',
         '// Handle child animation: calculate child\'s own scale ratio relative to rest',
@@ -4792,9 +4859,14 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenRot = restRot + accRotDelta;',
         '',
         '// Apply Affector rotation boost',
-        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
-        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
-        'var rotBoost = getAffectorRotationZBoost(restPosForAffector);',
+        '// Use delayed position (rest + delayed parent delta) so affector matches child visual position',
+        'var affectorPosRemapInfo = getRemapInfo(time, parentLayer.transform.position);',
+        'var parentPosForAffector = parentLayer.transform.position.valueAtTime(affectorPosRemapInfo.t1);',
+        'var currentPosForAffector = [',
+        '    cp("Rest Pos X") + (parentPosForAffector[0] - cp("Parent Rest Pos X")) * affectorPosRemapInfo.segInfluence,',
+        '    cp("Rest Pos Y") + (parentPosForAffector[1] - cp("Parent Rest Pos Y")) * affectorPosRemapInfo.segInfluence',
+        '];',
+        'var rotBoost = getAffectorRotationZBoost(currentPosForAffector);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         '// Calculate parented position for look-at (rest + parent delta, with delay influence)',
@@ -4865,9 +4937,14 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenRot = restRot + accRotDelta;',
         '',
         '// Apply Affector X rotation boost',
-        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
-        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
-        'var rotBoost = getAffectorRotationXBoost(restPosForAffector);',
+        '// Use delayed position (rest + delayed parent delta) so affector matches child visual position',
+        'var affectorPosRemapInfo = getRemapInfo(time, parentLayer.transform.position);',
+        'var parentPosForAffector = parentLayer.transform.position.valueAtTime(affectorPosRemapInfo.t1);',
+        'var currentPosForAffector = [',
+        '    cp("Rest Pos X") + (parentPosForAffector[0] - cp("Parent Rest Pos X")) * affectorPosRemapInfo.segInfluence,',
+        '    cp("Rest Pos Y") + (parentPosForAffector[1] - cp("Parent Rest Pos Y")) * affectorPosRemapInfo.segInfluence',
+        '];',
+        'var rotBoost = getAffectorRotationXBoost(currentPosForAffector);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         '// Apply Target look-at X rotation (pitch) - uses current position for look-at direction',
@@ -4909,9 +4986,14 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenRot = restRot + accRotDelta;',
         '',
         '// Apply Affector Y rotation boost',
-        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
-        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
-        'var rotBoost = getAffectorRotationYBoost(restPosForAffector);',
+        '// Use delayed position (rest + delayed parent delta) so affector matches child visual position',
+        'var affectorPosRemapInfo = getRemapInfo(time, parentLayer.transform.position);',
+        'var parentPosForAffector = parentLayer.transform.position.valueAtTime(affectorPosRemapInfo.t1);',
+        'var currentPosForAffector = [',
+        '    cp("Rest Pos X") + (parentPosForAffector[0] - cp("Parent Rest Pos X")) * affectorPosRemapInfo.segInfluence,',
+        '    cp("Rest Pos Y") + (parentPosForAffector[1] - cp("Parent Rest Pos Y")) * affectorPosRemapInfo.segInfluence',
+        '];',
+        'var rotBoost = getAffectorRotationYBoost(currentPosForAffector);',
         'parentDrivenRot = parentDrivenRot + rotBoost;',
         '',
         'var childAnimRot = value;',
@@ -4946,9 +5028,14 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         'var parentDrivenOpacity = restOpacity * effectiveRatio;',
         '',
         '// Apply Affector opacity multiplier',
-        '// Use REST position for affector distance calculation (not current position which may be affected by spread)',
-        'var restPosForAffector = [cp("Rest Pos X"), cp("Rest Pos Y")];',
-        'var opacityMult = getAffectorOpacityMult(restPosForAffector) / 100;',
+        '// Use delayed position (rest + delayed parent delta) so affector matches child visual position',
+        'var affectorPosRemapInfo = getRemapInfo(time, parentLayer.transform.position);',
+        'var parentPosForAffector = parentLayer.transform.position.valueAtTime(affectorPosRemapInfo.t1);',
+        'var currentPosForAffector = [',
+        '    cp("Rest Pos X") + (parentPosForAffector[0] - cp("Parent Rest Pos X")) * affectorPosRemapInfo.segInfluence,',
+        '    cp("Rest Pos Y") + (parentPosForAffector[1] - cp("Parent Rest Pos Y")) * affectorPosRemapInfo.segInfluence',
+        '];',
+        'var opacityMult = getAffectorOpacityMult(currentPosForAffector) / 100;',
         'parentDrivenOpacity = parentDrivenOpacity * opacityMult;',
         '',
         'var childAnimOpacity = value;',
@@ -6197,10 +6284,10 @@ function getStandaloneHeader() {
         '    var affectorPos = aff.transform.position.value;',
         '    var dx = pos[0] - affectorPos[0], dy = pos[1] - affectorPos[1];',
         '    var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
-        '    var alongDist = dx * Math.cos(angle) + dy * Math.sin(angle);',
+        '    var perpDist = -dx * Math.sin(angle) + dy * Math.cos(angle);',
         '    var innerR = 0; try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
-        '    if (innerR > 0 && Math.abs(alongDist) <= innerR) return 1;',
-        '    return alongDist >= 0 ? 1 : -1;',
+        '    if (innerR > 0 && Math.abs(perpDist) <= innerR) return 1;',
+        '    return perpDist >= 0 ? 1 : -1;',
         '}',
         '',
         'function getAffectorRotationBoost(pos, axis) {',
@@ -6557,11 +6644,11 @@ function applyStandaloneEffects() {
         '    var dx = pos[0] - affectorPos[0];',
         '    var dy = pos[1] - affectorPos[1];',
         '    var angle = (aff.threeDLayer ? aff.transform.zRotation.value : aff.transform.rotation.value) * Math.PI / 180;',
-        '    var alongDist = dx * Math.cos(angle) + dy * Math.sin(angle);',
+        '    var perpDist = -dx * Math.sin(angle) + dy * Math.cos(angle);',
         '    var innerR = 0;',
         '    try { innerR = aff.effect("Inner Radius")("Slider").value; } catch(e) {}',
-        '    if (innerR > 0 && Math.abs(alongDist) <= innerR) return 1;',
-        '    return alongDist >= 0 ? 1 : -1;',
+        '    if (innerR > 0 && Math.abs(perpDist) <= innerR) return 1;',
+        '    return perpDist >= 0 ? 1 : -1;',
         '}',
         '',
         'function getAffectorRotationXBoost(pos) {',
