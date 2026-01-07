@@ -1342,6 +1342,12 @@ function rigParentChildGroup(parent, children, comp, followOptions) {
 
         applyExpressions(data.child, parent, comp, is3D, parentSplitDims, groupBounds, null, followOptions);
     }
+
+    // Select the parent rig layer after applying
+    for (var s = 1; s <= comp.numLayers; s++) {
+        comp.layer(s).selected = false;
+    }
+    parent.selected = true;
 }
 
 // ============================================
@@ -3435,18 +3441,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        var unitX = dx / radialDist;',
             '        var unitY = dy / radialDist;',
             '        ',
-            '        // Adjust for inner radius (spread starts from inner edge)',
+            '        // For even VISUAL gaps, use integral of linear falloff influence',
+            '        // This accounts for items closer to center scaling more (taking more space)',
+            '        var outerR = innerR + falloffRadius;',
+            '        var spreadDist = Math.min(radialDist, outerR);',
+            '        ',
+            '        // Integral of linear falloff: d - d²/(2r) gives proper compensation',
+            '        // Items near center get less spread (they scale more, need less push)',
+            '        // Items further get more relative spread (they scale less)',
+            '        var compOffset = outerR > 0 ? growth * (spreadDist - spreadDist * spreadDist / (2 * outerR)) : 0;',
+            '        ',
+            '        // Affector gap uses effectiveDist (distance from inner radius edge)',
             '        var effectiveDist = radialDist > innerR ? radialDist - innerR : 0;',
-            '        ',
-            '        // Use LINEAR spread for consistent gaps (not quadratic integral)',
-            '        // Linear ratio: 0 at inner edge, 1 at falloff boundary',
-            '        var linearRatio = falloffRadius > 0 ? Math.min(effectiveDist / falloffRadius, 1) : 0;',
-            '        ',
-            '        // Scale compensation (radial) - linear for even gaps',
-            '        var compOffset = growth * itemSize * linearRatio;',
-            '        ',
-            '        // Affector gap (radial) - also linear',
-            '        var affectorOffset = affectorGap * linearRatio;',
+            '        var affectorRatio = falloffRadius > 0 ? Math.min(effectiveDist / falloffRadius, 1) : 0;',
+            '        var affectorOffset = affectorGap * affectorRatio;',
             '        ',
             '        // Global gap (based on how many items away)',
             '        var itemsAway = radialDist / itemSize;',
@@ -4071,18 +4079,20 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        var unitX = dx / radialDist;',
             '        var unitY = dy / radialDist;',
             '        ',
-            '        // Adjust for inner radius (spread starts from inner edge)',
+            '        // For even VISUAL gaps, use integral of linear falloff influence',
+            '        // This accounts for items closer to center scaling more (taking more space)',
+            '        var outerR = innerR + falloffRadius;',
+            '        var spreadDist = Math.min(radialDist, outerR);',
+            '        ',
+            '        // Integral of linear falloff: d - d²/(2r) gives proper compensation',
+            '        // Items near center get less spread (they scale more, need less push)',
+            '        // Items further get more relative spread (they scale less)',
+            '        var compOffset = outerR > 0 ? growth * (spreadDist - spreadDist * spreadDist / (2 * outerR)) : 0;',
+            '        ',
+            '        // Affector gap uses effectiveDist (distance from inner radius edge)',
             '        var effectiveDist = radialDist > innerR ? radialDist - innerR : 0;',
-            '        ',
-            '        // Use LINEAR spread for consistent gaps (not quadratic integral)',
-            '        // Linear ratio: 0 at inner edge, 1 at falloff boundary',
-            '        var linearRatio = falloffRadius > 0 ? Math.min(effectiveDist / falloffRadius, 1) : 0;',
-            '        ',
-            '        // Scale compensation (radial) - linear for even gaps',
-            '        var compOffset = growth * itemSize * linearRatio;',
-            '        ',
-            '        // Affector gap (radial) - also linear',
-            '        var affectorOffset = affectorGap * linearRatio;',
+            '        var affectorRatio = falloffRadius > 0 ? Math.min(effectiveDist / falloffRadius, 1) : 0;',
+            '        var affectorOffset = affectorGap * affectorRatio;',
             '        ',
             '        // Global gap (based on how many items away)',
             '        var itemsAway = radialDist / itemSize;',
