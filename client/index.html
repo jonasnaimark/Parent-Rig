@@ -17,13 +17,21 @@
                 <label><input type="checkbox" id="prAnchor"> Anchor point</label>
             </div>
         </div>
+
+        <div class="options-section">
+            <div class="options-header">Dynamic support (slower):</div>
+            <div class="checkbox-group">
+                <label><input type="checkbox" id="prIncludeAffector"> Affector system</label>
+                <label><input type="checkbox" id="prIncludeTarget"> Target system</label>
+            </div>
+        </div>
+
         <button id="applyRig" class="main-button">Apply Parent Rig</button>
+        <div class="button-row">
+            <button id="addAffector" class="half-button">Add Affector</button>
+            <button id="addTarget" class="half-button">Add Target</button>
+        </div>
         <button id="removeRig" class="secondary-button">Remove Parent Rig</button>
-
-        <div class="divider"></div>
-
-        <button id="addAffector" class="main-button">Add Affector</button>
-        <button id="addTarget" class="main-button">Add Target</button>
 
         <div class="divider"></div>
 
@@ -33,6 +41,7 @@
 
         <button id="addHorizontal" class="secondary-button">Horizontal Carousel</button>
         <button id="addVertical" class="secondary-button">Vertical List</button>
+        <button id="add3DList" class="secondary-button">3D List (X-90°)</button>
         <button id="addGrid" class="secondary-button">5x5 Grid</button>
         <button id="addRadial" class="secondary-button">Radial Carousel</button>
         <button id="addLargeCards" class="secondary-button">Large Cards (600px)</button>

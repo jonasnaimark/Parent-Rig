@@ -108,3 +108,30 @@ body {
     background: #3a3a3a;
     margin: 8px 0;
 }
+
+.button-row {
+    display: flex;
+    gap: 6px;
+}
+
+.half-button {
+    flex: 1;
+    background: #3a3a3a;
+    border: 1px solid #4a4a4a;
+    border-radius: 6px;
+    color: #ccc;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 8px 10px;
+    cursor: pointer;
+}
+
+.half-button:hover {
+    background: #4a4a4a;
+    color: #fff;
+    border-color: #5a5a5a;
+}
+
+.half-button:active {
+    background: #333;
+}

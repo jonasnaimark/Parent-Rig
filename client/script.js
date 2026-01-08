@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var gridButton = document.getElementById('addGrid');
     var radialButton = document.getElementById('addRadial');
     var largeCardsButton = document.getElementById('addLargeCards');
+    var threeDListButton = document.getElementById('add3DList');
 
     // Helper to get follow options from checkboxes
     function getFollowOptions() {
@@ -23,7 +24,9 @@ document.addEventListener('DOMContentLoaded', function() {
             scale: document.getElementById('prScale').checked,
             rotation: document.getElementById('prRotation').checked,
             opacity: document.getElementById('prOpacity').checked,
-            anchor: document.getElementById('prAnchor').checked
+            anchor: document.getElementById('prAnchor').checked,
+            includeAffector: document.getElementById('prIncludeAffector').checked,
+            includeTarget: document.getElementById('prIncludeTarget').checked
         };
     }
 
@@ -122,5 +125,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     largeCardsButton.addEventListener('click', function() {
         csInterface.evalScript('addLargeCards()');
+    });
+
+    threeDListButton.addEventListener('click', function() {
+        csInterface.evalScript('add3DList()');
     });
 });

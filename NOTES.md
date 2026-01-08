@@ -914,3 +914,124 @@ if (eff.name && eff.name !== "" && eff.numProperties >= 40) {
 ```
 
 If this issue returns, ensure the FFX file in `/assets/presets/` is up to date with the current effect structure.
+
+---
+
+## Conditional Code Generation Architecture (Jan 2025)
+
+### Overview
+
+As of January 2025, expression generation uses **conditional code blocks** to improve performance. Affector and Target systems are now optional - only included when the user enables them via checkboxes in the UI.
+
+**Performance impact:**
+- Checkboxes OFF (default): ~1m38s render (0 layer lookups for affector/target)
+- Checkboxes ON: ~2m10s render (10+ layer lookups per frame)
+
+### Two Expression Variants
+
+There are now **two variations** of generated expressions:
+
+1. **Fast Mode** (Affector/Target checkboxes OFF)
+   - No affector system code block
+   - No target system code block
+   - No function calls to `getAffectorSpread()`, `getTargetRepelOffset()`, etc.
+   - All core logic present (delays, pin edges, position/scale/rotation)
+
+2. **Full Mode** (Affector/Target checkboxes ON)
+   - Includes full affector system block (~370 lines)
+   - Includes full target system block (~140 lines)
+   - Function calls to affector/target methods in expressions
+
+### Code Locations
+
+**UI Checkboxes:**
+- `client/index.html` lines 21-27: "Dynamic support (slower)" section
+- `client/script.js` lines 28-29: `includeAffector` and `includeTarget` flags
+
+**Parsing:**
+- `host/main.jsx` lines 28-29: Default values in `parseFollowOptions()`
+- `host/main.jsx` lines 39-40: Parse from JSON
+
+**Expression Generation:**
+- `host/main.jsx` lines 2784-2785: Extract flags from `followOptions`
+- `host/main.jsx` lines 3236-3607: Conditional AFFECTOR SYSTEM block
+- `host/main.jsx` lines 3609-3743: Conditional TARGET SYSTEM block
+
+**Expression Function Calls:**
+- Position: lines 4811-4830 (affector spread/offset + target repel)
+- Scale: lines 4871-4886 (affector scale multiplier)
+- Rotation Z: lines 4932-4985 (affector boost + target look-at)
+- Rotation X: lines 5026-5051 (affector boost + target look-at)
+- Rotation Y: lines 5091-5106 (affector boost)
+- Opacity: lines 5117-5132 (affector opacity multiplier)
+
+### Making Fixes: What Affects What?
+
+#### ✅ Shared Code (affects ALL rigs)
+
+These changes apply to both Fast and Full modes:
+- Time remapping logic
+- Delay/stretch calculations
+- Pin edges system
+- Leader index logic
+- Order By modes
+- Transform Around modes
+- Base position/scale/rotation calculations
+- Property follow toggles (position, scale, rotation, opacity, anchor)
+
+**Location:** Most of `applyExpressions()` outside the conditional blocks
+
+#### ⚠️ Mode-Specific Code (only affects one type)
+
+**Affector-specific changes** (only affects rigs with "Affector system" checked):
+- Affector influence calculations
+- Spread/gap logic
+- Scale/rotation/opacity multipliers
+- Location: lines 3236-3607
+
+**Target-specific changes** (only affects rigs with "Target system" checked):
+- Look-at calculations
+- Repel force logic
+- Location: lines 3609-3743
+
+### Important: Slider Fallback Mode
+
+The **slider fallback mode** (lines 3747-3917) always includes stub functions for affector/target compatibility but they return default values (no-op). This ensures old rigs don't break but also means slider mode doesn't support affector/target features.
+
+### Testing Changes
+
+When making a fix, test BOTH modes:
+
+1. **Fast Mode Test:**
+   - Uncheck both "Affector system" and "Target system"
+   - Apply rig and verify fix works
+   - Verify render is fast (~1m30s-2m)
+
+2. **Full Mode Test (if applicable):**
+   - Check "Affector system" and/or "Target system"
+   - Apply rig and verify fix works
+   - Add affector/target layers and verify they work
+   - Render should be slower (~2m10s+)
+
+### Detection Logic
+
+When clicking "Add Affector" or "Add Target", the plugin checks if expressions have support:
+
+```javascript
+// Check if expression contains affector code
+var posExpr = layer.transform.position.expression;
+if (posExpr.indexOf("AFFECTOR SYSTEM") !== -1) {
+    hasAffectorSupport = true;
+}
+```
+
+**Location:** `addAffector()` at line 1743, `addTarget()` at line 2252
+
+If rig lacks support, user sees alert:
+> "This rig wasn't created with Affector support.
+>
+> To enable: check 'Affector system' and re-apply the Parent Rig."
+
+### Summary
+
+**Most code is shared** - 95% of bug fixes apply to all rigs automatically. Only affector/target-specific logic needs to be maintained in two places. The conditional blocks are well-isolated and clearly marked with `// ===== AFFECTOR SYSTEM =====` and `// ===== TARGET SYSTEM =====` comments.
