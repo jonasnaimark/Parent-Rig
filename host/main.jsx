@@ -482,13 +482,13 @@ function addLayersToExistingRig(parent, newChildren, comp, followOptions) {
 
     var parentAnchor = parent.transform.anchorPoint.valueAtTime(currentTime, false);
 
+    // Track wanted positions for each new child (for correction after index change)
+    var newChildrenData = [];
+
     for (var i = 0; i < newChildren.length; i++) {
         var child = newChildren[i];
 
-        // Sync child's split dimensions to match parent
-        child.transform.position.dimensionsSeparated = parentSplitDims;
-
-        var childLocalPos = child.transform.position.valueAtTime(currentTime, false);
+        // Capture other rest values while still parented
         var childRestScale = child.transform.scale.valueAtTime(currentTime, false);
         var childRestRot = is3D ? child.transform.zRotation.valueAtTime(currentTime, false) : child.transform.rotation.valueAtTime(currentTime, false);
         var childRestXRot = is3D ? child.transform.xRotation.valueAtTime(currentTime, false) : 0;
@@ -496,33 +496,136 @@ function addLayersToExistingRig(parent, newChildren, comp, followOptions) {
         var childRestOpacity = child.transform.opacity.valueAtTime(currentTime, false);
         var childRestAnchor = child.transform.anchorPoint.valueAtTime(currentTime, false);
 
-        var offsetX = childLocalPos[0] - parentAnchor[0];
-        var offsetY = childLocalPos[1] - parentAnchor[1];
-        offsetX *= parentRestScale[0] / 100;
-        offsetY *= parentRestScale[1] / 100;
+        // DEBUG: Check if child was parented
+        var wasParented = (child.parent !== null);
+        var oldParentName = wasParented ? child.parent.name : "none";
 
-        var radians = parentRestRot * Math.PI / 180;
-        var cosR = Math.cos(radians);
-        var sinR = Math.sin(radians);
-        var rotatedX = offsetX * cosR - offsetY * sinR;
-        var rotatedY = offsetX * sinR + offsetY * cosR;
+        // Capture position BEFORE removing parent (this is local/parent space)
+        var posBeforeUnparent = child.transform.position.valueAtTime(currentTime, false);
 
-        var childWorldPosAtRest;
-        if (childLocalPos.length > 2) {
-            var offsetZ = childLocalPos[2] - (parentAnchor.length > 2 ? parentAnchor[2] : 0);
-            offsetZ *= (parentRestScale.length > 2 ? parentRestScale[2] : 100) / 100;
-            childWorldPosAtRest = [parentRestPos[0] + rotatedX, parentRestPos[1] + rotatedY, (parentRestPos.length > 2 ? parentRestPos[2] : 0) + offsetZ];
+        // Remove parent - After Effects automatically converts position to world space
+        child.parent = null;
+
+        // Capture position AFTER removing parent (should be world space)
+        var posAfterUnparent = child.transform.position.valueAtTime(currentTime, false);
+
+        // Check current split dims state
+        var childHadSplitDims = child.transform.position.dimensionsSeparated;
+
+        // Sync child's split dimensions to match parent BEFORE capturing position
+        child.transform.position.dimensionsSeparated = parentSplitDims;
+
+        // Capture the current world position (AFTER unparenting and sync'ing split dims)
+        var childCurrentWorldPos;
+        if (parentSplitDims) {
+            childCurrentWorldPos = [
+                child.transform.xPosition.valueAtTime(currentTime, false),
+                child.transform.yPosition.valueAtTime(currentTime, false)
+            ];
+            if (is3D) {
+                childCurrentWorldPos.push(child.transform.zPosition.valueAtTime(currentTime, false));
+            }
         } else {
-            childWorldPosAtRest = [parentRestPos[0] + rotatedX, parentRestPos[1] + rotatedY];
+            childCurrentWorldPos = child.transform.position.valueAtTime(currentTime, false);
         }
 
-        child.parent = null;
+        // Get parent's CURRENT transform (where it is now in the animation)
+        var parentCurrentPos;
+        if (parentSplitDims) {
+            parentCurrentPos = [
+                parent.transform.xPosition.valueAtTime(currentTime, false),
+                parent.transform.yPosition.valueAtTime(currentTime, false)
+            ];
+            if (is3D) {
+                parentCurrentPos.push(parent.transform.zPosition.valueAtTime(currentTime, false));
+            }
+        } else {
+            parentCurrentPos = parent.transform.position.valueAtTime(currentTime, false);
+        }
+        var parentCurrentScale = parent.transform.scale.valueAtTime(currentTime, false);
+        var parentCurrentRot = is3D ? parent.transform.zRotation.valueAtTime(currentTime, false) : parent.transform.rotation.valueAtTime(currentTime, false);
+
+        // Calculate child rest position by reversing parent's transform
+        // This ensures the expression will evaluate to childCurrentWorldPos at this point in time
+        var offsetX = childCurrentWorldPos[0] - parentCurrentPos[0];
+        var offsetY = childCurrentWorldPos[1] - parentCurrentPos[1];
+        var offsetZ = (is3D && childCurrentWorldPos.length > 2) ? childCurrentWorldPos[2] - parentCurrentPos[2] : 0;
+
+        // Reverse parent rotation
+        var rotRad = -parentCurrentRot * Math.PI / 180;
+        var cosR = Math.cos(rotRad);
+        var sinR = Math.sin(rotRad);
+        var unrotatedX = offsetX * cosR - offsetY * sinR;
+        var unrotatedY = offsetX * sinR + offsetY * cosR;
+
+        // Reverse parent scale
+        var unscaledX = unrotatedX / (parentCurrentScale[0] / 100);
+        var unscaledY = unrotatedY / (parentCurrentScale[1] / 100);
+        var unscaledZ = offsetZ / ((is3D && parentCurrentScale.length > 2) ? (parentCurrentScale[2] / 100) : 1);
+
+        // Apply parent REST transform
+        var restRotRad = parentRestRot * Math.PI / 180;
+        var restCosR = Math.cos(restRotRad);
+        var restSinR = Math.sin(restRotRad);
+        var restRotatedX = unscaledX * restCosR - unscaledY * restSinR;
+        var restRotatedY = unscaledX * restSinR + unscaledY * restCosR;
+
+        var restScaledX = restRotatedX * (parentRestScale[0] / 100);
+        var restScaledY = restRotatedY * (parentRestScale[1] / 100);
+        var restScaledZ = unscaledZ * ((is3D && parentRestScale.length > 2) ? (parentRestScale[2] / 100) : 1);
+
+        var childWorldPosAtRest = [
+            parentRestPos[0] + restScaledX,
+            parentRestPos[1] + restScaledY
+        ];
+        if (is3D) {
+            childWorldPosAtRest.push((parentRestPos[2] || 0) + restScaledZ);
+        }
 
         addChildEffect(child, 999, parent.index,
             childWorldPosAtRest, childRestScale, childRestRot, childRestXRot, childRestYRot, childRestOpacity, childRestAnchor,
             parentRestPos, parentRestScale, parentRestRot, parentRestXRot, parentRestYRot, parentRestOpacity, parentRestAnchor, is3D);
 
-        applyExpressions(child, parent, comp, is3D, parentSplitDims, null, null, followOptions);
+        // Clear any existing expressions (but keep keyframes for animation)
+        // Set position to current world position if no keyframes
+        if (parentSplitDims) {
+            try {
+                child.transform.xPosition.expression = "";
+                if (child.transform.xPosition.numKeys === 0) {
+                    child.transform.xPosition.setValue(childCurrentWorldPos[0]);
+                }
+            } catch(e) {}
+            try {
+                child.transform.yPosition.expression = "";
+                if (child.transform.yPosition.numKeys === 0) {
+                    child.transform.yPosition.setValue(childCurrentWorldPos[1]);
+                }
+            } catch(e) {}
+            if (is3D && childCurrentWorldPos.length > 2) {
+                try {
+                    child.transform.zPosition.expression = "";
+                    if (child.transform.zPosition.numKeys === 0) {
+                        child.transform.zPosition.setValue(childCurrentWorldPos[2]);
+                    }
+                } catch(e) {}
+            }
+        } else {
+            try {
+                child.transform.position.expression = "";
+                if (child.transform.position.numKeys === 0) {
+                    child.transform.position.setValue(childCurrentWorldPos);
+                }
+            } catch(e) {}
+        }
+
+        // DON'T apply expressions yet - wait until after PR_Index is set
+        // (expressions will be applied after we calculate correct rest position based on delay)
+
+        // Store child and wanted position for correction after index change
+        newChildrenData.push({
+            child: child,
+            wantedPos: childCurrentWorldPos.slice()
+        });
     }
 
     var allChildren = findRiggedChildren(parent, comp);
@@ -542,6 +645,89 @@ function addLayersToExistingRig(parent, newChildren, comp, followOptions) {
     }
 
     setParentChildCount(parent, allChildren.length);
+
+    // FIX: After index is set, calculate CORRECT rest position based on delayed parent position
+    // Then apply the expression with this correct rest position
+    for (var ni = 0; ni < newChildrenData.length; ni++) {
+        var data = newChildrenData[ni];
+        var newChild = data.child;
+        var wantedPos = data.wantedPos;
+
+        try {
+            var childEff = newChild.effect("Parent Rig - Child");
+            var parentEff = parent.effect("Parent Rig - Parent");
+
+            if (childEff && parentEff) {
+                // Get the child's index and calculate its delay
+                var childIndex = childEff.property("Index").value;
+                var delayFrames = parentEff.property(3).value;  // PR_Delay
+                var delay = delayFrames * childIndex * comp.frameDuration;
+
+                // Get parent position at the DELAYED time (this is what the expression will sample)
+                var delayedTime = currentTime - delay;
+                var parentPosAtDelay;
+                if (parentSplitDims) {
+                    parentPosAtDelay = [
+                        parent.transform.xPosition.valueAtTime(delayedTime, false),
+                        parent.transform.yPosition.valueAtTime(delayedTime, false)
+                    ];
+                    if (is3D) parentPosAtDelay.push(parent.transform.zPosition.valueAtTime(delayedTime, false));
+                } else {
+                    parentPosAtDelay = parent.transform.position.valueAtTime(delayedTime, false);
+                }
+
+                // Get parent's rest position (stored in child effect)
+                var parentRestPosStored = [
+                    childEff.property("Parent Rest Pos X").value,
+                    childEff.property("Parent Rest Pos Y").value
+                ];
+                if (is3D) parentRestPosStored.push(childEff.property("Parent Rest Pos Z").value);
+
+                // Calculate the correct rest position
+                // Expression formula: childPos = restPos + (parentAtDelay - parentRest) * influence
+                // We want: wantedPos = restPos + (parentAtDelay - parentRest)
+                // So: restPos = wantedPos - (parentAtDelay - parentRest)
+                var correctRestPos = [];
+                for (var ci = 0; ci < wantedPos.length; ci++) {
+                    var parentDelta = (parentPosAtDelay[ci] || 0) - (parentRestPosStored[ci] || 0);
+                    correctRestPos.push(wantedPos[ci] - parentDelta);
+                }
+
+                // Set the correct rest position in the effect FIRST
+                childEff = newChild.effect("Parent Rig - Child");
+                childEff.property("Rest Pos X").setValue(correctRestPos[0]);
+                childEff.property("Rest Pos Y").setValue(correctRestPos[1]);
+                if (is3D) {
+                    childEff.property("Rest Pos Z").setValue(correctRestPos.length > 2 ? correctRestPos[2] : 0);
+                }
+
+                // CRITICAL: Also update the base position property to match rest position
+                // This ensures childDelta (value - restPos) = 0 when there's no child animation
+                // Without this, the expression uses the old wantedPos as value, causing double subtraction
+                if (parentSplitDims) {
+                    if (newChild.transform.xPosition.numKeys === 0) {
+                        newChild.transform.xPosition.setValue(correctRestPos[0]);
+                    }
+                    if (newChild.transform.yPosition.numKeys === 0) {
+                        newChild.transform.yPosition.setValue(correctRestPos[1]);
+                    }
+                    if (is3D && newChild.transform.zPosition.numKeys === 0) {
+                        newChild.transform.zPosition.setValue(correctRestPos.length > 2 ? correctRestPos[2] : 0);
+                    }
+                } else {
+                    if (newChild.transform.position.numKeys === 0) {
+                        newChild.transform.position.setValue(correctRestPos);
+                    }
+                }
+
+                // CRITICAL: Apply expression WITHOUT passing existingRestPos (pass null instead)
+                // This forces the expression to read dynamically from the effect via cp() rather than using hardcoded values
+                applyExpressions(newChild, parent, comp, is3D, parentSplitDims, null, null, followOptions);
+            }
+        } catch(e) {
+            alert("Error in delay correction: " + e.toString());
+        }
+    }
 }
 
 function setEffectValue(layer, effectName, value) {
@@ -1257,8 +1443,15 @@ function rigParentChildGroup(parent, children, comp, followOptions) {
         var isOriginalParentAsChild = rigLayerCreated && child.index === originalParent.index;
 
         if (isOriginalParentAsChild) {
+            // Original parent is now a child - use its local position as world position
             childWorldPos = childLocalPos.slice();
+        } else if (child.parent) {
+            // Child is currently parented - get its actual world position
+            // This handles adding children to an existing rig where the parent has moved
+            childWorldPos = getLayerWorldPosition(child, currentTime);
         } else {
+            // Child is not parented - calculate world position using parent's rest transform
+            // This is for freshly unparented children where position is already in world space
             var parentPos = parentRestPos;
             var parentAnchor = parentRestAnchor;
             var parentScale = parentRestScale;
