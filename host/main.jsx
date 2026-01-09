@@ -206,6 +206,17 @@ function createAutoParentLayer(comp, childLayers) {
     var autoParent = comp.layers.addShape();
     autoParent.name = "Parent Rig";
 
+    // CRITICAL: Remove any default content After Effects may have added
+    // This ensures isNullOrEmptyShape() recognizes it as empty
+    try {
+        var contents = autoParent.property("ADBE Root Vectors Group");
+        if (contents) {
+            while (contents.numProperties > 0) {
+                contents.property(1).remove();
+            }
+        }
+    } catch (e) {}
+
     // Check if any child is 3D
     var is3D = false;
     for (var i = 0; i < childLayers.length; i++) {
@@ -218,10 +229,22 @@ function createAutoParentLayer(comp, childLayers) {
         autoParent.threeDLayer = true;
     }
 
-    // Position at center of comp
-    var centerX = comp.width / 2;
-    var centerY = comp.height / 2;
-    autoParent.transform.position.setValue([centerX, centerY]);
+    // Position at the first selected layer's position (childLayers maintains selection order)
+    var currentTime = comp.time;
+    var firstChild = childLayers[0];
+    var firstChildPos;
+    if (firstChild.transform.position.dimensionsSeparated) {
+        firstChildPos = [
+            firstChild.transform.xPosition.valueAtTime(currentTime, false),
+            firstChild.transform.yPosition.valueAtTime(currentTime, false)
+        ];
+        if (is3D) {
+            firstChildPos.push(firstChild.transform.zPosition.valueAtTime(currentTime, false));
+        }
+    } else {
+        firstChildPos = firstChild.transform.position.valueAtTime(currentTime, false);
+    }
+    autoParent.transform.position.setValue(firstChildPos);
     autoParent.transform.anchorPoint.setValue([0, 0]);
 
     // Move to bottom of selected layers
@@ -242,6 +265,16 @@ function createParentRigLayer(originalParent, children, comp) {
     // Create empty shape layer
     var rigLayer = comp.layers.addShape();
     rigLayer.name = originalParent.name + " - Parent Rig";
+
+    // Remove any default content After Effects may have added
+    try {
+        var contents = rigLayer.property("ADBE Root Vectors Group");
+        if (contents) {
+            while (contents.numProperties > 0) {
+                contents.property(1).remove();
+            }
+        }
+    } catch (e) {}
 
     // Match 3D status first (before copying properties)
     if (originalParent.threeDLayer) {
@@ -278,7 +311,10 @@ function createParentRigLayer(originalParent, children, comp) {
 
 // Copy all transform property keyframes from source to target layer
 function copyTransformKeyframes(source, target) {
-    var props = ['position', 'scale', 'rotation', 'opacity', 'anchorPoint'];
+    var splitDims = source.transform.position.dimensionsSeparated;
+
+    // When dimensions are separated, skip combined 'position' and use xPosition/yPosition/zPosition instead
+    var props = splitDims ? ['scale', 'rotation', 'opacity', 'anchorPoint'] : ['position', 'scale', 'rotation', 'opacity', 'anchorPoint'];
     var props3D = ['xRotation', 'yRotation', 'zRotation', 'xPosition', 'yPosition', 'zPosition'];
 
     // Copy standard properties
@@ -287,7 +323,7 @@ function copyTransformKeyframes(source, target) {
     }
 
     // Copy 3D properties if applicable
-    if (source.threeDLayer) {
+    if (source.threeDLayer || splitDims) {
         for (var j = 0; j < props3D.length; j++) {
             try {
                 copyPropertyKeyframes(source.transform[props3D[j]], target.transform[props3D[j]]);
@@ -348,14 +384,17 @@ function copyPropertyKeyframes(sourceProp, targetProp) {
 // Clear all keyframes from transform properties and set to current values
 function clearTransformKeyframes(layer) {
     var currentTime = layer.containingComp.time;
-    var props = ['position', 'scale', 'rotation', 'opacity', 'anchorPoint'];
+    var splitDims = layer.transform.position.dimensionsSeparated;
+
+    // When dimensions are separated, skip combined 'position' and use xPosition/yPosition/zPosition instead
+    var props = splitDims ? ['scale', 'rotation', 'opacity', 'anchorPoint'] : ['position', 'scale', 'rotation', 'opacity', 'anchorPoint'];
     var props3D = ['xRotation', 'yRotation', 'zRotation', 'xPosition', 'yPosition', 'zPosition'];
 
     for (var i = 0; i < props.length; i++) {
         clearPropertyKeyframes(layer.transform[props[i]], currentTime);
     }
 
-    if (layer.threeDLayer) {
+    if (layer.threeDLayer || splitDims) {
         for (var j = 0; j < props3D.length; j++) {
             try {
                 clearPropertyKeyframes(layer.transform[props3D[j]], currentTime);
@@ -1066,8 +1105,9 @@ function findParentChildRelationships(selectedLayers, comp) {
     }
 
     // Second priority: only if no parent-child relationships found above,
-    // check if selected layers themselves have children
-    // (This handles the case where user selects the parent layer directly)
+    // AND if only ONE layer is selected, check if that layer has children
+    // (This handles the case where user selects a single parent layer directly)
+    // If multiple layers are selected with no common parent, skip this to create one auto-parent for all
     var hasAnyParents = false;
     for (var p in processedParents) {
         if (processedParents.hasOwnProperty(p)) {
@@ -1075,7 +1115,7 @@ function findParentChildRelationships(selectedLayers, comp) {
             break;
         }
     }
-    if (!hasAnyParents) {
+    if (!hasAnyParents && selectedLayers.length === 1) {
         for (var i = 0; i < selectedLayers.length; i++) {
             var layer = selectedLayers[i];
             var layerId = layer.index;
@@ -3199,8 +3239,10 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         header = header.concat([
             '',
             '// Find leader layer by searching for the child with matching Index',
-            'function findLeaderLayer() {',
-            '    var leaderIdx = Math.round(leaderIndexProp.valueAtTime(time));',
+            '// Optional time parameter - defaults to current time if not provided',
+            'function findLeaderLayer(atTime) {',
+            '    var t = (atTime !== undefined) ? atTime : time;',
+            '    var leaderIdx = Math.round(leaderIndexProp.valueAtTime(t));',
             '    for (var i = 1; i <= thisComp.numLayers; i++) {',
             '        try {',
             '            var layer = thisComp.layer(i);',
@@ -3215,6 +3257,12 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '        } catch(e) {}',
             '    }',
             '    return null;',
+            '}',
+            '',
+            '// Get leader index at a specific time',
+            'function getLeaderIndexAtTime(atTime) {',
+            '    var t = (atTime !== undefined) ? atTime : time;',
+            '    return Math.round(leaderIndexProp.valueAtTime(t));',
             '}',
             '',
             '// Children follow (indices 56-60)',
@@ -4538,51 +4586,89 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '// Transform around pivot (scale and/or rotation affecting child position)',
         '// Mode: 1=Child (skip), 2=Parent, 3=Leader',
         'if (scaleAroundMode > 1 || rotateAroundMode > 1) {',
-        '    // Determine pivot position based on mode',
-        '    var scalePivotPos = parentRestPos;',
+        '    // Get scale and rotation props - use raw time, not remapped',
+        '    var scaleProp = parentLayer.transform.scale;',
+        '    var rotProp = parentLayer.transform.rotation;',
+        '    ',
+        '    // Determine pivot REST position based on mode',
+        '    // IMPORTANT: Use REST positions for both child and pivot to stay in local space',
+        '    // This ensures scaling works correctly regardless of where parent is on screen',
+        '    var scalePivotPos = parentRestPos;  // Default to parent rest position (mode 2)',
         '    var rotatePivotPos = parentRestPos;',
         '    ',
-        '    // For Leader mode, find the leader layer position',
+        '    // For Leader mode, get leader\'s REST position from their effect',
         '    if (scaleAroundMode === 3 || rotateAroundMode === 3) {',
-        '        var leaderLayer = findLeaderLayer();',
-        '        var leaderIdx = Math.round(leaderIndexProp.valueAtTime(time));',
-        '        if (leaderLayer && myIndex !== leaderIdx) {',
-        '            var leaderPos = leaderLayer.transform.position.valueAtTime(time);',
-        '            if (scaleAroundMode === 3) scalePivotPos = leaderPos;',
-        '            if (rotateAroundMode === 3) rotatePivotPos = leaderPos;',
-        '        } else if (myIndex === leaderIdx) {',
-        '            // I am the leader - skip transform around self',
-        '            scalePivotPos = null;',
-        '            rotatePivotPos = null;',
+        '        // Always use raw time to find leader - children see same leader at same timeline moment',
+        '        // (Delay affects WHEN they see transforms, not WHICH leader they see)',
+        '        var leaderIdx = getLeaderIndexAtTime(time);',
+        '        ',
+        '        // Helper to get leader REST position from their effect (in local space)',
+        '        // Use index-based access: 3=Rest Pos X, 4=Rest Pos Y, 5=Rest Pos Z',
+        '        function getLeaderRestPos(leaderLayer) {',
+        '            try {',
+        '                var childEff = leaderLayer.effect("Parent Rig - Child");',
+        '                if (childEff) {',
+        '                    return [childEff(3).value, childEff(4).value' + (is3D ? ', childEff(5).value' : '') + '];',
+        '                }',
+        '            } catch(e) {}',
+        '            // Fallback to old slider mode',
+        '            try {',
+        '                var rx = leaderLayer.effect("PR_RestPosX")("Slider").value;',
+        '                var ry = leaderLayer.effect("PR_RestPosY")("Slider").value;',
+        '                return [rx, ry' + (is3D ? ', 0' : '') + '];',
+        '            } catch(e) {}',
+        '            return null;',
+        '        }',
+        '        ',
+        '        if (scaleAroundMode === 3) {',
+        '            if (myIndex !== leaderIdx) {',
+        '                var leaderLayerScale = findLeaderLayer(time);',
+        '                if (leaderLayerScale) {',
+        '                    var leaderRest = getLeaderRestPos(leaderLayerScale);',
+        '                    if (leaderRest) scalePivotPos = leaderRest;',
+        '                }',
+        '            } else {',
+        '                // I am the leader for scale - skip',
+        '                scalePivotPos = null;',
+        '            }',
+        '        }',
+        '        ',
+        '        if (rotateAroundMode === 3) {',
+        '            if (myIndex !== leaderIdx) {',
+        '                var leaderLayerRotate = findLeaderLayer(time);',
+        '                if (leaderLayerRotate) {',
+        '                    var leaderRest = getLeaderRestPos(leaderLayerRotate);',
+        '                    if (leaderRest) rotatePivotPos = leaderRest;',
+        '                }',
+        '            } else {',
+        '                // I am the leader for rotate - skip',
+        '                rotatePivotPos = null;',
+        '            }',
         '        }',
         '    }',
         '    ',
         '    // Apply scale around pivot first (scale before rotation in transform order)',
         '    if (scaleAroundMode > 1 && scalePivotPos !== null) {',
+        '        // Use REST positions for offset - both child and pivot in local space',
         '        var offsetFromPivot = sub(restPos, scalePivotPos);',
         '        var currentOffset = [offsetFromPivot[0], offsetFromPivot[1]' + (is3D ? ', offsetFromPivot[2]' : '') + '];',
-        '        var scaleProp = parentLayer.transform.scale;',
-        '        // Use getRemapInfo for proper delay + stretch timing',
-        '        var scaleRemapInfo = getRemapInfo(time, scaleProp);',
-        '        var parentScaleT = scaleProp.valueAtTime(scaleRemapInfo.t1);',
-        '        var scaleInfluence = scaleRemapInfo.segInfluence * childInfluence;',
+        '        // Use current scale at raw time - position timing already applied',
+        '        var parentScaleT = scaleProp.valueAtTime(time);',
         '        currentOffset[0] *= parentScaleT[0] / parentRestScale[0];',
         '        currentOffset[1] *= parentScaleT[1] / parentRestScale[1];',
         (is3D ? '        if (currentOffset.length > 2) currentOffset[2] *= (parentScaleT[2] || 100) / 100;' : ''),
         '        var scaleDelta = sub(currentOffset, offsetFromPivot);',
-        '        scaleDelta = mul(scaleDelta, scaleInfluence);',
+        '        scaleDelta = mul(scaleDelta, childInfluence);',
         '        parentedPos = add(parentedPos, scaleDelta);',
         '    }',
         '    ',
         '    // Apply rotation around pivot (2D rotation around Z axis)',
         '    if (rotateAroundMode > 1 && rotatePivotPos !== null) {',
+        '        // Use REST positions for offset - both child and pivot in local space',
         '        var offsetFromPivot = sub(restPos, rotatePivotPos);',
         '        var currentOffset = [offsetFromPivot[0], offsetFromPivot[1]' + (is3D ? ', offsetFromPivot[2]' : '') + '];',
-        '        var rotProp = parentLayer.transform.rotation;',
-        '        // Use getRemapInfo for proper delay + stretch timing',
-        '        var rotRemapInfo = getRemapInfo(time, rotProp);',
-        '        var rotateInfluence = rotRemapInfo.segInfluence * childInfluence;',
-        '        var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
+        '        // Use current rotation at raw time - position timing already applied',
+        '        var parentRotT = rotProp.valueAtTime(time);',
         '        var rotDelta = parentRotT - parentRestRot;',
         '        var rad = rotDelta * Math.PI / 180;',
         '        var cosR = Math.cos(rad);',
@@ -4591,7 +4677,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         '        var ry = currentOffset[0] * sinR + currentOffset[1] * cosR;',
         '        var rotatedOffset = [rx, ry' + (is3D ? ', currentOffset[2]' : '') + '];',
         '        var rotateDelta = sub(rotatedOffset, offsetFromPivot);',
-        '        rotateDelta = mul(rotateDelta, rotateInfluence);',
+        '        rotateDelta = mul(rotateDelta, childInfluence);',
         '        parentedPos = add(parentedPos, rotateDelta);',
         '    }',
         '}',
@@ -5242,64 +5328,94 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D, include
         '// Transform around pivot (scale and/or rotation affecting child position)',
         '// Mode: 1=Child (skip), 2=Parent, 3=Leader',
         'if (scaleAroundMode > 1 || rotateAroundMode > 1) {',
-        '    // Determine pivot positions based on mode',
-        '    var scalePivotX = parentRestPosX;',
+        '    // Get scale and rotation props - use raw time, not remapped',
+        '    // (Position expression handles its own timing; scale/rotation around pivot should just use current values)',
+        '    var scaleProp = parentLayer.transform.scale;',
+        '    var rotProp = parentLayer.transform.rotation;',
+        '    ',
+        '    // Determine pivot REST positions based on mode',
+        '    // IMPORTANT: Use REST positions for both child and pivot to stay in local space',
+        '    var scalePivotX = parentRestPosX;  // Default to parent REST position (mode 2)',
         '    var scalePivotY = parentRestPosY;',
         '    var rotatePivotX = parentRestPosX;',
         '    var rotatePivotY = parentRestPosY;',
         '    var skipScaleTransform = false;',
         '    var skipRotateTransform = false;',
         '    ',
-        '    // For Leader mode, find the leader layer position',
+        '    // For Leader mode, get leader\'s REST position from their effect',
         '    if (scaleAroundMode === 3 || rotateAroundMode === 3) {',
-        '        var leaderLayer = findLeaderLayer();',
-        '        var leaderIdx = Math.round(leaderIndexProp.valueAtTime(time));',
-        '        if (leaderLayer && myIndex !== leaderIdx) {',
-        '            // Get leader position (handle split dims)',
-        '            var leaderXProp = leaderLayer.transform.xPosition;',
-        '            var leaderYProp = leaderLayer.transform.yPosition;',
-        '            var leaderPos;',
-        '            if (leaderXProp && leaderYProp) {',
-        '                leaderPos = [leaderXProp.valueAtTime(time), leaderYProp.valueAtTime(time)];',
+        '        // Always use raw time to find leader - children see same leader at same timeline moment',
+        '        // (Delay affects WHEN they see transforms, not WHICH leader they see)',
+        '        var leaderIdx = getLeaderIndexAtTime(time);',
+        '        ',
+        '        // Helper to get leader REST position from their effect (in local space)',
+        '        // Use index-based access: 3=Rest Pos X, 4=Rest Pos Y',
+        '        function getLeaderRestPos(leaderLayer) {',
+        '            try {',
+        '                var childEff = leaderLayer.effect("Parent Rig - Child");',
+        '                if (childEff) {',
+        '                    return [childEff(3).value, childEff(4).value];',
+        '                }',
+        '            } catch(e) {}',
+        '            // Fallback to old slider mode',
+        '            try {',
+        '                var rx = leaderLayer.effect("PR_RestPosX")("Slider").value;',
+        '                var ry = leaderLayer.effect("PR_RestPosY")("Slider").value;',
+        '                return [rx, ry];',
+        '            } catch(e) {}',
+        '            return null;',
+        '        }',
+        '        ',
+        '        if (scaleAroundMode === 3) {',
+        '            if (myIndex !== leaderIdx) {',
+        '                var leaderLayerScale = findLeaderLayer(time);',
+        '                if (leaderLayerScale) {',
+        '                    var leaderRestPosScale = getLeaderRestPos(leaderLayerScale);',
+        '                    if (leaderRestPosScale) {',
+        '                        scalePivotX = leaderRestPosScale[0];',
+        '                        scalePivotY = leaderRestPosScale[1];',
+        '                    }',
+        '                }',
         '            } else {',
-        '                leaderPos = leaderLayer.transform.position.valueAtTime(time);',
+        '                skipScaleTransform = true;',
         '            }',
-        '            if (scaleAroundMode === 3) { scalePivotX = leaderPos[0]; scalePivotY = leaderPos[1]; }',
-        '            if (rotateAroundMode === 3) { rotatePivotX = leaderPos[0]; rotatePivotY = leaderPos[1]; }',
-        '        } else if (myIndex === leaderIdx) {',
-        '            // I am the leader - skip transform around self',
-        '            if (scaleAroundMode === 3) skipScaleTransform = true;',
-        '            if (rotateAroundMode === 3) skipRotateTransform = true;',
+        '        }',
+        '        ',
+        '        if (rotateAroundMode === 3) {',
+        '            if (myIndex !== leaderIdx) {',
+        '                var leaderLayerRotate = findLeaderLayer(time);',
+        '                if (leaderLayerRotate) {',
+        '                    var leaderRestPosRotate = getLeaderRestPos(leaderLayerRotate);',
+        '                    if (leaderRestPosRotate) {',
+        '                        rotatePivotX = leaderRestPosRotate[0];',
+        '                        rotatePivotY = leaderRestPosRotate[1];',
+        '                    }',
+        '                }',
+        '            } else {',
+        '                skipRotateTransform = true;',
+        '            }',
         '        }',
         '    }',
         '    ',
-        (needsBothAxes ? '    var offsetX = restPosX - (scaleAroundMode === 3 ? scalePivotX : parentRestPosX);' : ''),
-        (needsBothAxes ? '    var offsetY = restPosY - (scaleAroundMode === 3 ? scalePivotY : parentRestPosY);' : ''),
+        '    // Calculate offsets using REST positions (stay in local space)',
+        '    // IMPORTANT: Both child and pivot use REST positions for consistent coordinate space',
+        (needsBothAxes ? '    var offsetX = restPosX - scalePivotX;' : ''),
+        (needsBothAxes ? '    var offsetY = restPosY - scalePivotY;' : ''),
         (needsBothAxes ? '    var rotOffsetX = restPosX - rotatePivotX;' : ''),
         (needsBothAxes ? '    var rotOffsetY = restPosY - rotatePivotY;' : ''),
         '    ',
-        '    // Variables for influence (set by getRemapInfo in each block)',
-        '    var scaleInfluence = 0;',
-        '    var rotateInfluence = 0;',
-        '    ',
         '    // Apply scale around pivot',
         '    if (scaleAroundMode > 1 && !skipScaleTransform) {',
-        '        var scaleProp = parentLayer.transform.scale;',
-        '        // Use getRemapInfo for proper delay + stretch timing',
-        '        var scaleRemapInfo = getRemapInfo(time, scaleProp);',
-        '        scaleInfluence = scaleRemapInfo.segInfluence * childInfluence;',
-        '        var parentScaleT = scaleProp.valueAtTime(scaleRemapInfo.t1);',
+        '        // Use current scale at raw time - position timing already applied',
+        '        var parentScaleT = scaleProp.valueAtTime(time);',
         (needsBothAxes ? '        offsetX *= parentScaleT[0] / parentRestScaleX;' : ''),
         (needsBothAxes ? '        offsetY *= parentScaleT[1] / parentRestScaleY;' : ''),
         '    }',
         '    ',
         '    // Apply rotation around pivot',
         '    if (rotateAroundMode > 1 && !skipRotateTransform) {',
-        '        var rotProp = parentLayer.transform.rotation;',
-        '        // Use getRemapInfo for proper delay + stretch timing',
-        '        var rotRemapInfo = getRemapInfo(time, rotProp);',
-        '        rotateInfluence = rotRemapInfo.segInfluence * childInfluence;',
-        '        var parentRotT = rotProp.valueAtTime(rotRemapInfo.t1);',
+        '        // Use current rotation at raw time - position timing already applied',
+        '        var parentRotT = rotProp.valueAtTime(time);',
         '        var rotDelta = parentRotT - parentRestRot;',
         '        var rad = rotDelta * Math.PI / 180;',
         '        var cosR = Math.cos(rad);',
@@ -5311,14 +5427,15 @@ function createSplitPosExpr(header, timeRemapFunc, axis, propName, is3D, include
         '    }',
         '    ',
         '    // Calculate transform deltas for this axis',
-        (axis === 'X' ? '    var scaleOriginalOffset = restPosX - (scaleAroundMode === 3 ? scalePivotX : parentRestPosX);' : ''),
-        (axis === 'X' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetX - scaleOriginalOffset) * scaleInfluence;' : ''),
-        (axis === 'X' ? '    var rotOriginalOffset = restPosX - rotatePivotX;' : ''),
-        (axis === 'X' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetX - rotOriginalOffset) * rotateInfluence;' : ''),
-        (axis === 'Y' ? '    var scaleOriginalOffset = restPosY - (scaleAroundMode === 3 ? scalePivotY : parentRestPosY);' : ''),
-        (axis === 'Y' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetY - scaleOriginalOffset) * scaleInfluence;' : ''),
-        (axis === 'Y' ? '    var rotOriginalOffset = restPosY - rotatePivotY;' : ''),
-        (axis === 'Y' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetY - rotOriginalOffset) * rotateInfluence;' : ''),
+        '    // Original offset is the offset BEFORE scale/rotation (using REST positions)',
+        (axis === 'X' ? '    var scaleOriginalOffsetX = restPosX - scalePivotX;' : ''),
+        (axis === 'X' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetX - scaleOriginalOffsetX) * childInfluence;' : ''),
+        (axis === 'X' ? '    var rotOriginalOffsetX = restPosX - rotatePivotX;' : ''),
+        (axis === 'X' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetX - rotOriginalOffsetX) * childInfluence;' : ''),
+        (axis === 'Y' ? '    var scaleOriginalOffsetY = restPosY - scalePivotY;' : ''),
+        (axis === 'Y' ? '    var scaleDelta = skipScaleTransform ? 0 : (offsetY - scaleOriginalOffsetY) * childInfluence;' : ''),
+        (axis === 'Y' ? '    var rotOriginalOffsetY = restPosY - rotatePivotY;' : ''),
+        (axis === 'Y' ? '    var rotateDelta = skipRotateTransform ? 0 : (rotOffsetY - rotOriginalOffsetY) * childInfluence;' : ''),
         (axis === 'Z' ? '    var scaleDelta = 0; // Z transform around pivot not supported in split dimensions' : ''),
         (axis === 'Z' ? '    var rotateDelta = 0;' : ''),
         '    parentedPos += scaleDelta + rotateDelta;',
