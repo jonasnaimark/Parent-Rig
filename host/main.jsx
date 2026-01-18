@@ -802,12 +802,12 @@ function setEffectValue(layer, effectName, value) {
 function setParentChildCount(parentLayer, count) {
     var effects = parentLayer.property("ADBE Effect Parade");
 
-    // Try pseudo effect mode first (index 71 for Child count)
+    // Try pseudo effect mode first (index 72 for Child count)
     for (var i = 1; i <= effects.numProperties; i++) {
         var eff = effects.property(i);
         if (eff.matchName === "Pseudo/ParentRigParent" || eff.name === "Parent Rig - Parent") {
             try {
-                eff.property(71).setValue(count);
+                eff.property(72).setValue(count);
                 return true;
             } catch (e) {
                 // Fallback to name-based access
@@ -1438,17 +1438,17 @@ function rigParentChildGroup(parent, children, comp, followOptions) {
     addParentEffect(parent, children.length);
 
     // Set the "Children follow" checkboxes in the parent effect to match panel options
-    // This makes the effect UI reflect what's actually applied (indices 56-60)
+    // This makes the effect UI reflect what's actually applied (indices 57-61)
     try {
         var pEffects = parent.property("ADBE Effect Parade");
         for (var pe = 1; pe <= pEffects.numProperties; pe++) {
             if (pEffects.property(pe).matchName === "Pseudo/ParentRigParent") {
                 var pEff = pEffects.property(pe);
-                pEff(56).setValue(followOptions.position ? 1 : 0);  // Position
-                pEff(57).setValue(followOptions.scale ? 1 : 0);     // Scale
-                pEff(58).setValue(followOptions.rotation ? 1 : 0);  // Rotation
-                pEff(59).setValue(followOptions.opacity ? 1 : 0);   // Opacity
-                pEff(60).setValue(followOptions.anchor ? 1 : 0);    // Anchor point
+                pEff(57).setValue(followOptions.position ? 1 : 0);  // Position
+                pEff(58).setValue(followOptions.scale ? 1 : 0);     // Scale
+                pEff(59).setValue(followOptions.rotation ? 1 : 0);  // Rotation
+                pEff(60).setValue(followOptions.opacity ? 1 : 0);   // Opacity
+                pEff(61).setValue(followOptions.anchor ? 1 : 0);    // Anchor point
                 break;
             }
         }
@@ -1612,9 +1612,9 @@ function addParentEffect(layer, childCount) {
             if (eff.numProperties >= 60) {
                 eff.name = "Parent Rig - Parent";  // Ensure consistent name for expression access
                 pseudoEffectApplied = true;
-                // Set the child count value (index 71)
+                // Set the child count value (index 72)
                 try {
-                    eff.property(71).setValue(childCount);
+                    eff.property(72).setValue(childCount);
                 } catch (e2) {
                     try {
                         eff.property("Child count").setValue(childCount);
@@ -1623,8 +1623,8 @@ function addParentEffect(layer, childCount) {
                 // Set pin boundary defaults from comp size
                 var comp = layer.containingComp;
                 try {
-                    eff.property(43).setValue(comp.height);  // Bottom Y boundary
-                    eff.property(51).setValue(comp.width);   // Right X boundary
+                    eff.property(44).setValue(comp.height);  // Bottom Y boundary
+                    eff.property(52).setValue(comp.width);   // Right X boundary
                 } catch (e2) {}
             } else {
                 // Effect was created but is broken - remove it and try fallback
@@ -1652,7 +1652,7 @@ function addParentEffect(layer, childCount) {
                     if (eff.matchName === "Pseudo/ParentRigParent" || eff.name === "Parent Rig - Parent") {
                         eff.name = "Parent Rig - Parent";  // Ensure consistent name for expression access
                         try {
-                            eff.property(71).setValue(childCount);  // Child count
+                            eff.property(72).setValue(childCount);  // Child count
                         } catch (e2) {
                             try {
                                 eff.property("Child count").setValue(childCount);
@@ -1661,8 +1661,8 @@ function addParentEffect(layer, childCount) {
                         // Set pin boundary defaults from comp size
                         var comp = layer.containingComp;
                         try {
-                            eff.property(43).setValue(comp.height);  // Bottom Y boundary
-                            eff.property(51).setValue(comp.width);   // Right X boundary
+                            eff.property(44).setValue(comp.height);  // Bottom Y boundary
+                            eff.property(52).setValue(comp.width);   // Right X boundary
                         } catch (e2) {}
                         break;
                     }
@@ -3202,28 +3202,29 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
         header.push('var myIndex = cp("Index") || 1;');
         header.push('var childInfluence = (cp("Influence") || 100) / 100;');
         header.push('');
-        header.push('// Delay section (indices 3-6)');
+        header.push('// Delay section (indices 3-7)');
         header.push('var delayProp = pEff(3);');
         header.push('var stretchProp = pEff(4);');
-        header.push('var parentInfluenceProp = pEff(5);');
-        header.push('var delayFalloffProp = pEff(6);');
+        header.push('var delayVariationProp = pEff(5);');
+        header.push('var parentInfluenceProp = pEff(6);');
+        header.push('var delayFalloffProp = pEff(7);');
         header.push('');
-        header.push('// Order section (indices 13-15)');
-        header.push('var orderByProp = pEff(13);');
-        header.push('var reverseOrderProp = pEff(14);');
-        header.push('var randomSeed = pEff(15).value;');
+        header.push('// Order section (indices 14-16)');
+        header.push('var orderByProp = pEff(14);');
+        header.push('var reverseOrderProp = pEff(15);');
+        header.push('var randomSeed = pEff(16).value;');
         header.push('');
-        header.push('// Leader layer section (indices 20-22)');
-        header.push('var leaderIndexProp = pEff(20);');
-        header.push('var delayBeforeLeaderProp = pEff(21);');
-        header.push('var delayAfterLeaderProp = pEff(22);');
+        header.push('// Leader layer section (indices 21-23)');
+        header.push('var leaderIndexProp = pEff(21);');
+        header.push('var delayBeforeLeaderProp = pEff(22);');
+        header.push('var delayAfterLeaderProp = pEff(23);');
         header.push('');
 
         // Conditionally add pivot transform variables
         if (includePivotTransform) {
-            header.push('// Transform type popups (indices 27-28): 1=Child, 2=Parent, 3=Leader');
-            header.push('var scaleAroundMode = 1; try { scaleAroundMode = pEff(27).value; } catch(e) {}');
-            header.push('var rotateAroundMode = 1; try { rotateAroundMode = pEff(28).value; } catch(e) {}');
+            header.push('// Transform type popups (indices 28-29): 1=Child, 2=Parent, 3=Leader');
+            header.push('var scaleAroundMode = 1; try { scaleAroundMode = pEff(28).value; } catch(e) {}');
+            header.push('var rotateAroundMode = 1; try { rotateAroundMode = pEff(29).value; } catch(e) {}');
             header.push('// Convert to number to ensure proper comparison');
             header.push('scaleAroundMode = Number(scaleAroundMode) || 1;');
             header.push('rotateAroundMode = Number(rotateAroundMode) || 1;');
@@ -3232,19 +3233,19 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
 
         // Conditionally add pin edges variables
         if (includePinEdges) {
-            header.push('// Pinning section (indices 32-51)');
-            header.push('var pinDirectionProp = pEff(32);');
-            header.push('var pinInfluenceProp = pEff(33);');
-            header.push('var pinStretchProp = pEff(34);');
-            header.push('var pinTrimProp = pEff(35);');
-            header.push('var pinTopEnabled = pEff(38).value;');
-            header.push('var pinTopY = pEff(39).value;');
-            header.push('var pinBottomEnabled = pEff(42).value;');
-            header.push('var pinBottomY = pEff(43).value;');
-            header.push('var pinLeftEnabled = pEff(46).value;');
-            header.push('var pinLeftX = pEff(47).value;');
-            header.push('var pinRightEnabled = pEff(50).value;');
-            header.push('var pinRightX = pEff(51).value;');
+            header.push('// Pinning section (indices 33-52)');
+            header.push('var pinDirectionProp = pEff(33);');
+            header.push('var pinInfluenceProp = pEff(34);');
+            header.push('var pinStretchProp = pEff(35);');
+            header.push('var pinTrimProp = pEff(36);');
+            header.push('var pinTopEnabled = pEff(39).value;');
+            header.push('var pinTopY = pEff(40).value;');
+            header.push('var pinBottomEnabled = pEff(43).value;');
+            header.push('var pinBottomY = pEff(44).value;');
+            header.push('var pinLeftEnabled = pEff(47).value;');
+            header.push('var pinLeftX = pEff(48).value;');
+            header.push('var pinRightEnabled = pEff(51).value;');
+            header.push('var pinRightX = pEff(52).value;');
             header.push('');
         }
 
@@ -3278,25 +3279,25 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    return Math.round(leaderIndexProp.valueAtTime(t));',
             '}',
             '',
-            '// Children follow (indices 56-60)',
-            'var followPosition = pEff(56).value;',
-            'var followScale = pEff(57).value;',
-            'var followRotation = pEff(58).value;',
-            'var followOpacity = pEff(59).value;',
-            'var followAnchorPoint = pEff(60).value;',
+            '// Children follow (indices 57-61)',
+            'var followPosition = pEff(57).value;',
+            'var followScale = pEff(58).value;',
+            'var followRotation = pEff(59).value;',
+            'var followOpacity = pEff(60).value;',
+            'var followAnchorPoint = pEff(61).value;',
             '',
-            '// Delays apply to (indices 65-69)',
-            'var delayPosition = pEff(65).value;',
-            'var delayScale = pEff(66).value;',
-            'var delayRotation = pEff(67).value;',
-            'var delayOpacity = pEff(68).value;',
-            'var delayAnchorPoint = pEff(69).value;',
+            '// Delays apply to (indices 66-70)',
+            'var delayPosition = pEff(66).value;',
+            'var delayScale = pEff(67).value;',
+            'var delayRotation = pEff(68).value;',
+            'var delayOpacity = pEff(69).value;',
+            'var delayAnchorPoint = pEff(70).value;',
             '',
             '// Flag for whether delays apply to current transform (set per-expression)',
             'var applyDelayToThisTransform = true;',
             '',
-            '// Child count (index 71)',
-            'var childCount = pEff(71).value;',
+            '// Child count (index 72)',
+            'var childCount = pEff(72).value;',
             '',
             '// Group bounds for position-based ordering (calculated at rig time)',
             'var groupMinX = ' + groupBounds.minX + ';',
@@ -3422,14 +3423,22 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    return getEffectiveIndex(baseIdx, falloff);',
             '}',
             '',
+            '// Function to get variation multiplier (seeded by layer index for consistency)',
+            'function getVariationMult(t) {',
+            '    var variationAmt = delayVariationProp.valueAtTime(t);',
+            '    if (variationAmt <= 0) return 1;',
+            '    seedRandom(index, true);',
+            '    return 1 + (random() - 0.5) * variationAmt / 50;',
+            '}',
+            '',
             '// Function to get delay/stretch at a specific time (returns 0 if delays disabled for this transform)',
             'function getDelayAtTime(t) {',
             '    if (!applyDelayToThisTransform) return 0;',
-            '    return delayProp.valueAtTime(t) * getEffectiveIndexAtTime(t) * thisComp.frameDuration;',
+            '    return delayProp.valueAtTime(t) * getEffectiveIndexAtTime(t) * getVariationMult(t) * thisComp.frameDuration;',
             '}',
             'function getStretchAtTime(t) {',
             '    if (!applyDelayToThisTransform) return 0;',
-            '    return stretchProp.valueAtTime(t) * getEffectiveIndexAtTime(t) * thisComp.frameDuration;',
+            '    return stretchProp.valueAtTime(t) * getEffectiveIndexAtTime(t) * getVariationMult(t) * thisComp.frameDuration;',
             '}',
             ''
         ]);
@@ -4098,6 +4107,7 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             'var childCount = parentLayer.effect("PR_Child Count")("Slider").value;',
             '// Features not available in fallback mode (pseudo effect only)',
             'var parentInfluenceProp = {value: 100, valueAtTime: function(t) { return 100; }};',
+            'var delayVariationProp = {value: 0, valueAtTime: function(t) { return 0; }};',
             'var leaderIndexProp = {value: 1, valueAtTime: function(t) { return 1; }};',
             'var delayBeforeLeaderProp = {value: 100, valueAtTime: function(t) { return 100; }};',
             'var delayAfterLeaderProp = {value: 100, valueAtTime: function(t) { return 100; }};',
@@ -4153,14 +4163,22 @@ function applyExpressions(child, parent, comp, is3D, splitDims, groupBounds, exi
             '    return 1 + rand * (count - 1);',
             '}',
             '',
+            '// Function to get variation multiplier (seeded by layer index for consistency)',
+            'function getVariationMult(t) {',
+            '    var variationAmt = delayVariationProp.valueAtTime(t);',
+            '    if (variationAmt <= 0) return 1;',
+            '    seedRandom(index, true);',
+            '    return 1 + (random() - 0.5) * variationAmt / 50;',
+            '}',
+            '',
             '// Function to get delay/stretch at a specific time (returns 0 if delays disabled for this transform)',
             'function getDelayAtTime(t) {',
             '    if (!applyDelayToThisTransform) return 0;',
-            '    return delayProp.valueAtTime(t) * myIndex * thisComp.frameDuration;',
+            '    return delayProp.valueAtTime(t) * myIndex * getVariationMult(t) * thisComp.frameDuration;',
             '}',
             'function getStretchAtTime(t) {',
             '    if (!applyDelayToThisTransform) return 0;',
-            '    return effect("PR_Delay Stretch")("Slider").valueAtTime(t) * myIndex * thisComp.frameDuration;',
+            '    return effect("PR_Delay Stretch")("Slider").valueAtTime(t) * myIndex * getVariationMult(t) * thisComp.frameDuration;',
             '}',
             '',
             '// Index values for blending (fallback mode uses stack order only)',
@@ -5794,6 +5812,29 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
         'var parentRestScaleZ = eff(31).value;',
         'var parentRestRot = eff(32).value;',
         'var parentRestOpacity = eff(33).value;',
+        '',
+        '// Helper: Get world scale (traverses parent chain)',
+        'function getWorldScale(layer, t) {',
+        '    var s = layer.transform.scale.valueAtTime(t);',
+        '    var p = layer;',
+        '    while (p.hasParent) {',
+        '        p = p.parent;',
+        '        var ps = p.transform.scale.valueAtTime(t);',
+        '        s = [s[0] * ps[0] / 100, s[1] * ps[1] / 100, (s.length > 2 && ps.length > 2) ? s[2] * ps[2] / 100 : 100];',
+        '    }',
+        '    return s;',
+        '}',
+        '',
+        '// Helper: Get world rotation (traverses parent chain)',
+        'function getWorldRotation(layer, t, prop) {',
+        '    var r = layer.transform[prop].valueAtTime(t);',
+        '    var p = layer;',
+        '    while (p.hasParent) {',
+        '        p = p.parent;',
+        '        try { r += p.transform[prop].valueAtTime(t); } catch(e) {}',
+        '    }',
+        '    return r;',
+        '}',
         ''
     ].join('\n');
 
@@ -5805,8 +5846,8 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
         '// Get parent WORLD position at delayed time (accounts for entire parent chain)',
         '// IMPORTANT: toWorld([0,0]) gives world pos of anchor point, NOT toWorld(anchorPoint)',
         'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
-        'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-        'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
+        'var parentScale = getWorldScale(parentLayer, t);',
+        'var parentRot = getWorldRotation(parentLayer, t, "' + (is3D ? 'zRotation' : 'rotation') + '");',
         '',
         '// Start with keyframed value',
         'var result = value.slice ? value.slice() : [value[0], value[1]' + (is3D ? ', value[2]' : '') + '];',
@@ -5889,7 +5930,7 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
     // Rotation expression - allows keyframing on top of parent following
     var rotExpr = header + [
         'var t = Math.max(0, time - delaySecs);',
-        'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
+        'var parentRot = getWorldRotation(parentLayer, t, "' + (is3D ? 'zRotation' : 'rotation') + '");',
         'var parentDelta = (parentRot - parentRestRot) * influenceRotation;',
         '// Start with keyframed value, add parent delta',
         'value + parentDelta;'
@@ -5915,8 +5956,8 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
         var posXExpr = header + [
             'var t = Math.max(0, time - delaySecs);',
             'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
-            'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-            'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
+            'var parentScale = getWorldScale(parentLayer, t);',
+            'var parentRot = getWorldRotation(parentLayer, t, "' + (is3D ? 'zRotation' : 'rotation') + '");',
             '',
             'var posDeltaX = (parentWorldPos[0] - parentRestPosX) * influencePosX;',
             'var result = value + posDeltaX;',
@@ -5942,8 +5983,8 @@ function applyChildRigExpressions(child, parentName, effectName, is3D) {
         var posYExpr = header + [
             'var t = Math.max(0, time - delaySecs);',
             'var parentWorldPos = parentLayer.toWorld([0, 0], t);',
-            'var parentScale = parentLayer.transform.scale.valueAtTime(t);',
-            'var parentRot = parentLayer.transform.' + (is3D ? 'zRotation' : 'rotation') + '.valueAtTime(t);',
+            'var parentScale = getWorldScale(parentLayer, t);',
+            'var parentRot = getWorldRotation(parentLayer, t, "' + (is3D ? 'zRotation' : 'rotation') + '");',
             '',
             'var posDeltaY = (parentWorldPos[1] - parentRestPosY) * influencePosY;',
             'var result = value + posDeltaY;',
